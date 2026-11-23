@@ -45,6 +45,16 @@
         if (g.buttons[0] && g.buttons[0].pressed) st.handbrake = 1;
         if ((g.buttons[2] && g.buttons[2].pressed) || (g.buttons[5] && g.buttons[5].pressed)) st.nitro = 1;
       }
+      // on-screen controls (phones): steering is analog, the buttons are held
+      const T = HL.Touch;
+      if (T && T.active) {
+        const ts = T.state;
+        if (Math.abs(ts.steer) > 0.02) st.steer = ts.steer;
+        if (ts.throttle) st.throttle = 1;
+        if (ts.brake) st.brake = 1;
+        if (ts.handbrake) st.handbrake = 1;
+        if (ts.nitro) st.nitro = 1;
+      }
       return st;
     },
   };

@@ -53,3 +53,35 @@ p { margin: 0; line-height: 1.5; max-width: 62ch; }
   .preview { height: 120px; }
   .preview img { max-height: 100px; }
 }
+
+/* ---------- touch controls (phones) ---------- */
+html, body { touch-action: none; overscroll-behavior: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.screen { touch-action: pan-y; z-index: 10; }
+#touch { position: fixed; inset: 0; display: none; pointer-events: none; z-index: 5; touch-action: none; }
+body.touch #touch.show { display: block; }
+#t-pad { position: absolute; left: 0; top: 130px; bottom: 0; width: 48%; pointer-events: auto; touch-action: none; }
+#t-hint { position: absolute; left: calc(env(safe-area-inset-left, 0px) + 20px); bottom: calc(env(safe-area-inset-bottom, 0px) + 34px); color: rgba(255, 255, 255, 0.35); font: 700 15px "Segoe UI", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+#t-base, #t-knob { position: fixed; border-radius: 50%; opacity: 0; pointer-events: none; transform: translate(-50%, -50%); transition: opacity 0.1s; }
+#t-base { width: 150px; height: 150px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); }
+#t-knob { width: 62px; height: 62px; background: rgba(255, 255, 255, 0.55); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4); }
+#t-base.on, #t-knob.on { opacity: 1; }
+.tbtn, .tsmall { position: absolute; pointer-events: auto; touch-action: none; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; color: #fff; font: 800 15px "Segoe UI", sans-serif; letter-spacing: 0.05em; padding: 0; background: rgba(20, 24, 30, 0.55); border: 2px solid rgba(255, 255, 255, 0.4); backdrop-filter: blur(3px); }
+.tbtn small { font-size: 10px; font-weight: 700; opacity: 0.7; letter-spacing: 0.1em; }
+.tbtn.down { transform: scale(0.94); background: rgba(255, 255, 255, 0.35); }
+#t-gas { width: 112px; height: 112px; right: calc(env(safe-area-inset-right, 0px) + 20px); bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); border-color: #4be08a; background: rgba(75, 224, 138, 0.22); font-size: 18px; }
+#t-brake { width: 92px; height: 92px; right: calc(env(safe-area-inset-right, 0px) + 144px); bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); border-color: #ff6b6b; background: rgba(255, 107, 107, 0.2); }
+#t-drift { width: 74px; height: 74px; right: calc(env(safe-area-inset-right, 0px) + 150px); bottom: calc(env(safe-area-inset-bottom, 0px) + 128px); border-color: #ffd23f; font-size: 13px; }
+#t-nitro { width: 74px; height: 74px; right: calc(env(safe-area-inset-right, 0px) + 40px); bottom: calc(env(safe-area-inset-bottom, 0px) + 148px); border-color: #38b6ff; background: rgba(56, 182, 255, 0.2); font-size: 13px; }
+.tsmall { width: 46px; height: 46px; left: calc(env(safe-area-inset-left, 0px) + 10px); font-size: 20px; border-radius: 12px; }
+#t-pause { top: calc(env(safe-area-inset-top, 0px) + 10px); }
+#t-reset { top: calc(env(safe-area-inset-top, 0px) + 62px); }
+.tsmall:active { background: rgba(255, 255, 255, 0.3); }
+/* short landscape screens: tuck the buttons in */
+@media (max-height: 460px) {
+  #t-gas { width: 92px; height: 92px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+  #t-brake { width: 78px; height: 78px; right: calc(env(safe-area-inset-right, 0px) + 124px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+  #t-drift { width: 62px; height: 62px; right: calc(env(safe-area-inset-right, 0px) + 128px); bottom: calc(env(safe-area-inset-bottom, 0px) + 104px); }
+  #t-nitro { width: 62px; height: 62px; right: calc(env(safe-area-inset-right, 0px) + 36px); bottom: calc(env(safe-area-inset-bottom, 0px) + 116px); }
+  #t-pad { top: 0; }
+  #t-hint { display: none; }
+}

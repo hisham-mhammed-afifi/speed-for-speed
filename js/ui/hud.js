@@ -98,6 +98,37 @@
     if (pl.flat > 0) { ctx.fillStyle = '#ff4a4a'; ctx.fillText('FLAT TIRES ' + pl.flat.toFixed(0) + 's', bx, by + 32); }
   }
 
+  // compact speed readout for phones (the round gauges are too big next to the touch buttons)
+  function touchPanel(ctx, G, x, y, w) {
+    const pl = G.player.car;
+    const h = 58;
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,10,14,0.62)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, 10); else ctx.rect(x, y, w, h);
+    ctx.fill();
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 28px "Segoe UI", sans-serif';
+    const kmh = String(Math.round(pl.speed * 3.6));
+    ctx.fillText(kmh, x + 10, y + 29);
+    const tw = ctx.measureText(kmh).width;
+    ctx.font = '700 10px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('KM/H', x + 14 + tw, y + 29);
+    let gear = String(pl.gear);
+    if (pl.reversing) gear = 'R'; else if (pl.speed < 0.5 && pl.ctrl.throttle < 0.05) gear = 'N';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = pl.shiftT > 0 ? '#ffb02e' : '#fff';
+    ctx.font = '800 22px "Segoe UI", sans-serif';
+    ctx.fillText(gear, x + w - 10, y + 28);
+    bar(ctx, x + 10, y + 38, w - 20, 5, pl.nitro, pl.nitroOn ? '#9be7ff' : '#38b6ff');
+    bar(ctx, x + 10, y + 47, w - 20, 5, pl.health / 100, pl.health > 50 ? '#7be08a' : pl.health > 25 ? '#ffb02e' : '#ff4a4a');
+    ctx.restore();
+    if (pl.flat > 0) { ctx.fillStyle = '#ff4a4a'; ctx.font = '700 11px "Segoe UI", sans-serif'; ctx.textAlign = 'left'; ctx.fillText('FLAT TIRES ' + pl.flat.toFixed(0) + 's', x, y + h + 14); }
+  }
+
   function minimap(ctx, G, cx, cy, r, cam) {
     const pl = G.player.car, H = G.heat;
     const range = 240, k = r / range;
@@ -140,16 +171,26 @@
     ctx.save();
     ctx.textBaseline = 'alphabetic';
 
-    // gauges bottom-right
-    const r = 92 * s;
-    speedo(ctx, G, W - r - 28 * s, H - r - 62 * s, r);
+    const touch = !!(HL.Touch && HL.Touch.active);
+    const sf = HL.safe || { t: 0, r: 0, b: 0, l: 0 };
+    const portrait = H > W;
 
-    // minimap top-right
-    const mr = 88 * s;
-    minimap(ctx, G, W - mr - 20 * s, mr + 20 * s, mr, cam);
+    if (touch) {
+      // phone layout: speed panel beside the pause/reset buttons (top-left), small minimap top-right
+      touchPanel(ctx, G, sf.l + 64, sf.t + 10, 150);
+      const mr = clamp(Math.min(W, H) * 0.16, 50, 78);
+      minimap(ctx, G, W - sf.r - mr - 10, sf.t + mr + 10, mr, cam);
+    } else {
+      // gauges bottom-right
+      const r = 92 * s;
+      speedo(ctx, G, W - r - 28 * s, H - r - 62 * s, r);
+      // minimap top-right
+      const mr = 88 * s;
+      minimap(ctx, G, W - mr - 20 * s, mr + 20 * s, mr, cam);
+    }
 
-    // heat stars + bounty (top center)
-    const cx = W / 2, top = 18 * s;
+    // heat stars + bounty (top center; on a portrait phone it drops below the speed panel row)
+    const cx = W / 2, top = touch ? (portrait ? sf.t + 84 : sf.t + 8) : 18 * s;
     const flash = Math.floor(G.time * 4) % 2;
     for (let i = 0; i < 5; i++) {
       const lit = heat.active && i < heat.level;
@@ -188,18 +229,29 @@
       t.t += dt;
       if (t.t > 4) { G.toasts.splice(i, 1); continue; }
     }
+    // toasts sit under the heat block on a portrait phone, under the pause buttons in landscape
+    const toastX = touch ? sf.l + 12 : 16 * s;
+    const toastY = touch ? (portrait ? top + 140 * s : sf.t + 120) : 20 * s;
     G.toasts.forEach((t, i) => {
       ctx.globalAlpha = clamp(4 - t.t, 0, 1);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       const w = ctx.measureText(t.text).width + 20;
-      ctx.fillRect(16 * s, (20 + i * 32) * s, w, 26 * s);
+      ctx.fillRect(toastX, toastY + i * 32 * s, w, 26 * s);
       ctx.fillStyle = t.color;
-      ctx.fillText(t.text, 26 * s, (39 + i * 32) * s);
+      ctx.fillText(t.text, toastX + 10 * s, toastY + (19 + i * 32) * s);
     });
     ctx.globalAlpha = 1;
 
     // hint
-    if (G.time < 14 && !heat.active) {
+    if (touch && G.time < 14 && !heat.active) {
+      ctx.textAlign = 'center';
+      ctx.font = '700 14px "Segoe UI", sans-serif';
+      const lines = ['Left thumb: drag to steer', 'Right thumb: GAS / BRAKE / DRIFT / NITRO', 'Speed past a cop or ram one to start a pursuit'];
+      const bw2 = Math.min(W - 24, 330), by2 = H * 0.28; // above the car, which sits at screen centre
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(W / 2 - bw2 / 2, by2, bw2, 84);
+      lines.forEach((l, i) => { ctx.fillStyle = i === 2 ? '#ffd23f' : '#fff'; ctx.fillText(l, W / 2, by2 + 26 + i * 24, bw2 - 16); });
+    } else if (!touch && G.time < 14 && !heat.active) {
       ctx.textAlign = 'left';
       ctx.font = '600 ' + Math.round(14 * s) + 'px "Segoe UI", sans-serif';
       ctx.fillStyle = 'rgba(0,0,0,0.5)';

@@ -65,7 +65,7 @@
     $('btn-sel-back').onclick = () => Menus.show('title');
     $('btn-prev').onclick = () => Menus.step(-1);
     $('btn-next').onclick = () => Menus.step(1);
-    $('btn-drive').onclick = () => G.startGame(Menus.index);
+    $('btn-drive').onclick = () => { if (HL.Touch) HL.Touch.goFullscreen(); G.startGame(Menus.index); };
     $('p-resume').onclick = () => G.togglePause();
     $('p-cam').onclick = () => { HL.Camera.mode = HL.Camera.mode === 'north' ? 'heading' : 'north'; Menus.refreshPause(); };
     $('p-debug').onclick = () => { HL.Renderer.debug = !HL.Renderer.debug; Menus.refreshPause(); };

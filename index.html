@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d0f12">
 <title>HEATLINE - Police Pursuit Racer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d0f12'/%3E%3Cpath d='M16 5l3.2 7.4 8 .7-6 5.3 1.8 7.8L16 22l-7 4.2 1.8-7.8-6-5.3 8-.7z' fill='%23ff3b3b'/%3E%3C/svg%3E">
 
@@ -41,6 +44,7 @@
       <ul class="tips">
         <li>Heat rises the longer you run and the more cops you wreck: roadblocks at 3, spike strips at 4, a helicopter at 5.</li>
         <li>Brake before corners. Grass slows you down, and heavy hits damage your car.</li>
+        <li>Phone: drag your left thumb to steer; right thumb has GAS, BRAKE (hold to reverse), DRIFT and NITRO. The top-left buttons pause and reset your car.</li>
         <li>Gamepad: left stick steer, triggers throttle/brake, A handbrake, X nitro.</li>
       </ul>
       <button id="btn-help-back" class="primary">Back</button>
@@ -94,6 +98,17 @@
   </div>
 </div>
 
+<div id="touch">
+  <div id="t-pad"><div id="t-hint">&#8249; steer &#8250;</div></div>
+  <div id="t-base"></div><div id="t-knob"></div>
+  <button id="t-pause" class="tsmall" aria-label="Pause">II</button>
+  <button id="t-reset" class="tsmall" aria-label="Reset car">&#8634;</button>
+  <button id="t-nitro" class="tbtn">NITRO</button>
+  <button id="t-drift" class="tbtn">DRIFT</button>
+  <button id="t-brake" class="tbtn">BRAKE<small>REV</small></button>
+  <button id="t-gas" class="tbtn">GAS</button>
+</div>
+
 <script src="js/vendor/matter.min.js"></script>
 <script src="js/core/math.js"></script>
 <script src="js/core/input.js"></script>
@@ -113,6 +128,7 @@
 <script src="js/render/renderer.js"></script>
 <script src="js/ui/hud.js"></script>
 <script src="js/ui/menus.js"></script>
+<script src="js/ui/touch.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

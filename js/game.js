@@ -118,6 +118,8 @@
     HL.Camera.snap();
   }
 
+  G.resetCar = resetCar; // used by the touch overlay's reset button
+
   // ---------- collisions (reported by Matter.js, see js/physics/world.js) ----------
   // a, b: game cars or null for buildings/walls; dvA, dvB: velocity change of each car (m/s)
   G.onImpact = function (a, b, dvA, dvB, x, y, nx, ny) {
@@ -190,6 +192,7 @@
 
   function render(alpha, dt) {
     handleKeys();
+    HL.Touch.update(G);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#0d0f12';
     ctx.fillRect(0, 0, W, H);
@@ -204,7 +207,7 @@
       // menu backdrop: slow flyover
       titleT += dt;
       cam.x = 900 + Math.cos(titleT * 0.05) * 500; cam.y = 900 + Math.sin(titleT * 0.04) * 400;
-      cam.angle = 0; cam.view = 110; cam.scale = H / cam.view; cam.shake = 0;
+      cam.angle = 0; cam.view = 110; cam.scale = Math.min(W, H) / cam.view; cam.shake = 0;
       cam.begin(ctx, W, H);
       G.time += dt;
       HL.Renderer.drawWorld(ctx, cam, G, 1);
@@ -214,9 +217,25 @@
     }
   }
 
+  // notch / home-bar insets (CSS env() values read back in px, so the canvas HUD can stay clear of them)
+  let safeProbe = null;
+  function readSafeArea() {
+    if (!safeProbe) {
+      safeProbe = document.createElement('div');
+      safeProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
+        'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+      document.body.appendChild(safeProbe);
+    }
+    const cs = getComputedStyle(safeProbe);
+    HL.safe = { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 };
+  }
+  HL.safe = { t: 0, r: 0, b: 0, l: 0 };
+
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // phones are often 3x DPR; 1.5x looks the same in motion for a fraction of the pixels
+    dpr = Math.min(window.devicePixelRatio || 1, HL.Touch && HL.Touch.active ? 1.5 : 2);
     W = window.innerWidth; H = window.innerHeight;
+    readSafeArea();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   }
@@ -231,6 +250,11 @@
     HL.Renderer.init(ctx);
     HL.Heat.reset();
     HL.Menus.init();
+    HL.Touch.onChange = resize; // switching between touch and keyboard changes the resolution cap
+    HL.Touch.init();
+    resize();
+    // a phone call or app switch must not leave you driving blind into a bust
+    document.addEventListener('visibilitychange', () => { if (document.hidden && G.state === 'play') G.togglePause(); });
     HL.Menus.show('loading');
     const bar = document.getElementById('load-bar');
     HL.Assets.load(HL.ALL_CAR_FILES, (p) => { bar.style.width = Math.round(p * 100) + '%'; }).then(() => {

@@ -26,6 +26,13 @@ then open http://localhost:8765. Useful URL flags: `?auto=1&car=0..8&heat=1..5` 
 
 Gamepad: left stick, triggers, A = handbrake, X = nitro.
 
+### Phones / touch
+On-screen controls appear automatically on touch devices (and the game goes fullscreen + landscape where the browser allows it):
+- **Left thumb:** put it anywhere on the left side and slide left/right to steer (analog).
+- **Right thumb:** GAS, BRAKE (hold to reverse), DRIFT (handbrake) and NITRO.
+- **Top-left:** pause and reset-car buttons. The game also pauses by itself if you switch apps.
+Touch support lives in `js/ui/touch.js`; it feeds `HL.Input.poll()` like the keyboard and gamepad do.
+
 ## How it works
 - `js/physics/world.js` sets up the Matter.js engine (no gravity, 10 units per metre, stepped at 120 Hz). Buildings and
   the city boundary are static bodies; every car is a dynamic body. Collision events report impacts to the game for

@@ -11,7 +11,8 @@
       const px = pl.px + (pl.x - pl.px) * alpha, py = pl.py + (pl.y - pl.py) * alpha;
       const lx = clamp(pl.wvx * 0.3, -16, 16), ly = clamp(pl.wvy * 0.3, -16, 16);
       const tx = px + lx, ty = py + ly;
-      const view = 34 + 36 * clamp(pl.speed / 62, 0, 1);
+      // `view` = metres of road visible across the SHORTER screen side, so portrait phones see as much as landscape
+      const view = (HL.Touch && HL.Touch.active ? 30 : 34) + 36 * clamp(pl.speed / 62, 0, 1);
       const targetAngle = this.mode === 'heading' ? -Math.PI / 2 - (pl.pth + HL.wrapAngle(pl.theta - pl.pth) * alpha) : 0;
       if (!this.init) {
         this.x = tx; this.y = ty; this.view = view; this.angle = targetAngle; this.init = true;
@@ -20,7 +21,7 @@
       this.y = HL.damp(this.y, ty, 7, dt);
       this.view = HL.damp(this.view, view, 1.4, dt);
       this.angle += HL.wrapAngle(targetAngle - this.angle) * (1 - Math.exp(-5 * dt));
-      this.scale = H / this.view;
+      this.scale = Math.min(W, H) / this.view;
       this.shake *= Math.exp(-5 * dt);
     },
     begin(ctx, W, H) {
