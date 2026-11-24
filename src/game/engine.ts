@@ -17,7 +17,8 @@ import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { createCity } from './world/city'
 import { Traffic } from './world/traffic'
-import type { CarKind, CarSpec, RunResult, RunStats, SaveData } from './types'
+import { DISTRICT_NAMES } from './types'
+import type { CarKind, CarSpec, District, RunResult, RunStats, SaveData } from './types'
 import type { CameraMode } from './render/camera'
 
 const store = () => useGameStore.getState()
@@ -34,6 +35,8 @@ class GameEngine {
   private dpr = 1
   private titleT = 0
   private hudT = 0
+  private districtT = 0
+  private lastDistrict: District | null = null
   private carIndex = 0
   private saveData: SaveData = loadSave()
   private params = new URLSearchParams()
@@ -177,6 +180,8 @@ class GameEngine {
     const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'player')
     game.player = { car, spec }
     game.time = 0
+    this.lastDistrict = null
+    this.districtT = 0
     store().clearToasts()
     camera.snap()
     for (let i = 0; i < 160 && game.civs.length < Math.floor(Traffic.target * 0.7); i++) Traffic.spawn()
@@ -327,6 +332,15 @@ class GameEngine {
     }
     FX.update(dt)
     if (pl.health <= 0 && game.state === 'play') this.endRun('wrecked')
+    this.districtT += dt
+    if (this.districtT >= 0.5) {
+      this.districtT = 0
+      const d = city.districtAt(pl.x, pl.y)
+      if (d !== this.lastDistrict) {
+        if (this.lastDistrict !== null) game.toast('Entering: ' + DISTRICT_NAMES[d], '#9ec5ff')
+        this.lastDistrict = d
+      }
+    }
   }
 
   private handleKeys(): void {

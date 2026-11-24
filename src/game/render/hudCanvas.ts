@@ -30,12 +30,20 @@ export function initHudMap(city: City): void {
   x.fillRect(0, 0, w, h)
   x.scale(k, k)
   x.translate(-b.minX, -b.minY)
+  // a tint per district so you can tell where you are at a glance
+  const tint = { downtown: '#222833', port: '#2d2a25', suburbs: '#24302a' } as const
   for (const bl of city.blocks) {
-    x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : '#23272d'
+    x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
-  x.fillStyle = '#23272d'
-  for (const bd of city.buildings) x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)
+  for (const bd of city.buildings) {
+    x.fillStyle = bd.kind === 'container' ? '#3b2f2b' : bd.kind === 'house' ? '#2f3a30' : bd.kind === 'tower' ? '#1c2029' : '#26231f'
+    x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)
+  }
+  // the highway ring in amber
+  x.fillStyle = '#7a6a3a'
+  for (const i of [0, city.NV - 1]) x.fillRect(city.vx[i] - city.vw[i] / 2, b.minY, city.vw[i], b.maxY - b.minY)
+  for (const j of [0, city.NH - 1]) x.fillRect(b.minX, city.hy[j] - city.hw[j] / 2, b.maxX - b.minX, city.hw[j])
   map = cv
   bounds = b
 }
@@ -262,7 +270,7 @@ export function drawHudCanvas(ctx: CanvasRenderingContext2D, W: number, H: numbe
       'Matter.js bodies ' + Phys.engine!.world.bodies.length + '  sliding ' + (pl.sliding ? 'yes' : 'no'),
       'accel fwd ' + pl.aF.toFixed(1) + '  lat ' + pl.aL.toFixed(1) + ' m/s2  grip use ' + (pl.gripUse * 100).toFixed(0) + '%',
       'gear ' + pl.gear + '  rpm ' + pl.rpm.toFixed(0),
-      'surface ' + pl.surfaceKind + '  skid ' + pl.skid.toFixed(2),
+      'surface ' + pl.surfaceKind + '  skid ' + pl.skid.toFixed(2) + '  district ' + game.city.districtAt(pl.x, pl.y),
       'heat ' + heat.level + ' pts ' + heat.points.toFixed(0) + ' evade ' + heat.evade.toFixed(1),
     ]
     lines.forEach((l, i) => ctx.fillText(l, 16, 150 + i * 15))

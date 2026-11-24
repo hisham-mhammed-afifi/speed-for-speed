@@ -25,7 +25,7 @@ function makeTex(size: number, base: string, spread: number, count: number): HTM
   return c
 }
 
-type PatternName = 'asphalt' | 'sidewalk' | 'lot' | 'grass'
+type PatternName = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'port' | 'lawn' | 'plaza'
 const pat = {} as Record<PatternName, CanvasPattern>
 
 // ---------------------------------------------------------------- ground
@@ -39,7 +39,8 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
     if (bl.x1 < vis.x0 || bl.x0 > vis.x1 || bl.y1 < vis.y0 || bl.y0 > vis.y1) continue
     ctx.fillStyle = pat.sidewalk
     ctx.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
-    ctx.fillStyle = bl.type === 'park' ? pat.grass : pat.lot
+    // each district has its own ground: grey concrete downtown, dark port concrete, lawns in the suburbs
+    ctx.fillStyle = bl.type === 'park' ? pat.grass : bl.district === 'suburbs' ? pat.lawn : bl.district === 'port' ? pat.port : bl.type === 'plaza' ? pat.plaza : pat.lot
     ctx.fillRect(bl.x0 + 3, bl.y0 + 3, bl.x1 - bl.x0 - 6, bl.y1 - bl.y0 - 6)
     ctx.strokeStyle = 'rgba(0,0,0,0.35)'
     ctx.lineWidth = 0.3
@@ -70,7 +71,22 @@ function drawRoadSeg(ctx: CanvasRenderingContext2D, horiz: boolean, c: number, w
   ctx.lineWidth = 0.16
   roadLine(ctx, horiz, c - w / 2 + 0.6, a0, a1)
   roadLine(ctx, horiz, c + w / 2 - 0.6, a0, a1)
-  if (type === 'avenue') {
+  if (type === 'highway') {
+    // grass-free median strip with yellow edges, then three dashed lanes each way
+    ctx.strokeStyle = '#2b2d31'
+    ctx.lineWidth = 1.6
+    roadLine(ctx, horiz, c, a0, a1)
+    ctx.strokeStyle = '#e0b92a'
+    ctx.lineWidth = 0.18
+    roadLine(ctx, horiz, c - 1, a0, a1)
+    roadLine(ctx, horiz, c + 1, a0, a1)
+    ctx.strokeStyle = 'rgba(240,240,240,0.85)'
+    ctx.setLineDash([4, 6])
+    for (const o of [5.2, 10.4]) {
+      roadLine(ctx, horiz, c - o, a0, a1)
+      roadLine(ctx, horiz, c + o, a0, a1)
+    }
+  } else if (type === 'avenue') {
     ctx.strokeStyle = '#e0b92a'
     ctx.lineWidth = 0.17
     roadLine(ctx, horiz, c - 0.25, a0, a1)
@@ -123,6 +139,7 @@ function drawMarkings(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
       if (x + 40 < vis.x0 || x - 40 > vis.x1) continue
       const vw = city.vw[i],
         hw = city.hw[j]
+      if (city.vt[i] === 'highway' || city.ht[j] === 'highway') continue // no zebra crossings on or beside the highway ring
       if (city.vt[i] !== 'alley') {
         for (let sgn = -1; sgn <= 1; sgn += 2) {
           const yy = y + sgn * (hw / 2 + 1.6) - 1.1
@@ -140,6 +157,22 @@ function drawMarkings(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
     }
   }
   ctx.fill()
+}
+
+/** Concrete highway barriers (they are also static colliders). */
+function drawBarriers(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
+  const list = city.barriers
+  for (let i = 0; i < list.length; i++) {
+    const b = list[i]
+    if (b.x + b.hx < vis.x0 || b.x - b.hx > vis.x1 || b.y + b.hy < vis.y0 || b.y - b.hy > vis.y1) continue
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'
+    ctx.fillRect(b.x - b.hx + 0.35, b.y - b.hy + 0.45, b.hx * 2, b.hy * 2)
+    ctx.fillStyle = '#5d6168'
+    ctx.fillRect(b.x - b.hx, b.y - b.hy, b.hx * 2, b.hy * 2)
+    ctx.strokeStyle = '#e6e9ee'
+    ctx.lineWidth = 0.2
+    ctx.strokeRect(b.x - b.hx + 0.1, b.y - b.hy + 0.1, b.hx * 2 - 0.2, b.hy * 2 - 0.2)
+  }
 }
 
 // ---------------------------------------------------------------- cars
@@ -438,6 +471,9 @@ export const Renderer = {
     pat.sidewalk = mk(makeTex(256, '#8a8c90', 40, 1500))
     pat.lot = mk(makeTex(256, '#6f7378', 36, 1500))
     pat.grass = mk(makeTex(256, '#3f6b34', 60, 3000))
+    pat.lawn = mk(makeTex(256, '#4c7a3a', 50, 2600))
+    pat.port = mk(makeTex(256, '#585d63', 44, 2200))
+    pat.plaza = mk(makeTex(256, '#8d9096', 30, 900))
     FX.init()
   },
 
@@ -446,6 +482,7 @@ export const Renderer = {
       vis = cam.vis
     drawGround(ctx, city, vis)
     drawMarkings(ctx, city, vis)
+    drawBarriers(ctx, city, vis)
     FX.drawSkids(ctx, vis)
     drawSpikes(ctx, game.heat.spikes)
     const blds = city.queryBuildings(vis.x0, vis.y0, vis.x1, vis.y1, qb)

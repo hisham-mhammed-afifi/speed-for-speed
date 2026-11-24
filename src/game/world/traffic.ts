@@ -4,9 +4,13 @@ import { TRAFFIC_CARS } from '../data/cars'
 import { game } from '../state'
 import { carGrid } from './carGrid'
 import type { Car } from '../physics/car'
+import type { District } from '../types'
 import type { City } from './city'
 
 const nearScratch: Car[] = []
+
+/** How likely a candidate spawn point is accepted, per district (1 = always). */
+const TRAFFIC_WEIGHT: Record<District, number> = { downtown: 1, port: 0.55, suburbs: 0.45, highway: 0.8 }
 
 /** Follows the road graph, one lane edge at a time (right-hand traffic). Used by civilians and patrol cops. */
 export class LaneDriver {
@@ -79,7 +83,7 @@ export class LaneDriver {
     const tx = pa.x + ux * tt - uy * off,
       ty = pa.y + uy * tt + ux * off
     steerTo(car, tx, ty)
-    let target = this.speedCap * (w >= 24 ? 1.3 : w <= 8 ? 0.6 : 1)
+    let target = this.speedCap * (w >= 36 ? 2 : w >= 24 ? 1.3 : w <= 8 ? 0.6 : 1) // the highway ring is fast
     if (this.turnSlow && toEnd < 40) target = Math.min(target, 6.5)
     if (this.pullOver) target = Math.min(target, 3)
     // cross traffic: ease off for a fast car that is about to cross our path at the next intersection
@@ -185,6 +189,7 @@ export const Traffic = {
         ny = city.nodeY(n)
       const d = Math.hypot(nx - pl.x, ny - pl.y)
       if (d < 150 || d > 360) continue
+      if (Math.random() > TRAFFIC_WEIGHT[city.districtAt(nx, ny)]) continue // busy downtown, sparse suburbs
       const nb = city.neighbors(n)
       const to = nb[(Math.random() * nb.length) | 0]
       const t = 0.25 + Math.random() * 0.4

@@ -23,7 +23,7 @@ export const Phys = {
   engine: null as Matter.Engine | null,
   cars: [] as Car[],
 
-  init(city: { buildings: Building[]; walls: Wall[] }): void {
+  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[] }): void {
     const engine = Engine.create({ positionIterations: 8, velocityIterations: 6, enableSleeping: false })
     engine.gravity.x = 0
     engine.gravity.y = 0
@@ -35,6 +35,7 @@ export const Phys = {
       statics.push(Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, { isStatic: true, friction: 0.3, restitution: 0.15, label: 'static' }))
     for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy)
     for (const w of city.walls) add(w.x, w.y, w.hx, w.hy)
+    for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy)
     Composite.add(engine.world, statics)
     Events.on(engine, 'collisionStart', onCollisionStart)
   },

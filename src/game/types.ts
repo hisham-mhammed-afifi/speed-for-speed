@@ -79,8 +79,22 @@ export interface Safe {
   l: number
 }
 
+/** City areas. `highway` is the fast ring road; the other three tile the interior blocks. */
+export type District = 'downtown' | 'port' | 'suburbs' | 'highway'
+export type BlockDistrict = Exclude<District, 'highway'>
+
+export const DISTRICT_NAMES: Record<District, string> = {
+  downtown: 'Downtown',
+  port: 'Port District',
+  suburbs: 'Suburbs',
+  highway: 'Highway Ring',
+}
+
+export type BuildingKind = 'tower' | 'warehouse' | 'house' | 'container'
+
 /** Axis-aligned building collider + render data. */
 export interface Building {
+  kind: BuildingKind
   x: number
   y: number
   theta: number
@@ -113,6 +127,7 @@ export interface Block {
   x1: number
   y1: number
   type: 'build' | 'park' | 'plaza'
+  district: BlockDistrict
 }
 
 export interface Tree {

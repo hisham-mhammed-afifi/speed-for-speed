@@ -5,7 +5,7 @@ import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
-import { createCity, SURF } from './world/city'
+import { createCity, RAMPS, SURF } from './world/city'
 import type { Building } from './types'
 
 const DT = 1 / 120
@@ -133,7 +133,7 @@ describe('Matter.js car physics (headless)', () => {
 
   it('stops at a building without tunnelling and reports the impact', () => {
     const wall: Building = {
-      x: 100, y: 0, theta: 0, hx: 20, hy: 20, x0: 80, y0: -20, x1: 120, y1: 20, height: 30, roof: '', wall: '', props: [], hasHeli: false, stamp: 0,
+      x: 100, y: 0, theta: 0, hx: 20, hy: 20, kind: 'tower', x0: 80, y0: -20, x1: 120, y1: 20, height: 30, roof: '', wall: '', props: [], hasHeli: false, stamp: 0,
     }
     Phys.init({ buildings: [wall], walls: [] })
     const car = spawn(PLAYER_CARS[0], 40, 0, 0)
@@ -219,5 +219,82 @@ describe('busy roads (plan 4)', () => {
     }
     const ms = (performance.now() - t0) / N
     expect(ms).toBeLessThan(3) // ~0.3 ms in practice; this guards against accidental O(n^2) blow-ups
+  })
+})
+
+describe('city districts (plan 5)', () => {
+  const city = createCity()
+
+  it('has downtown, port and suburbs, and the spawn point is downtown', () => {
+    const present = new Set(city.blocks.map((b) => b.district))
+    expect([...present].sort()).toEqual(['downtown', 'port', 'suburbs'])
+    expect(city.districtAt(city.nodeX(city.nodeId(8, 8)), city.nodeY(city.nodeId(8, 8)))).toBe('downtown')
+    expect(city.districtAt(city.vx[0], 300)).toBe('highway')
+  })
+
+  it('is deterministic for a seed (districts and buildings)', () => {
+    const again = createCity()
+    expect(again.blocks.map((b) => b.district)).toEqual(city.blocks.map((b) => b.district))
+    expect(again.buildings.length).toBe(city.buildings.length)
+    expect(createCity(99).blocks.map((b) => b.district)).not.toEqual(city.blocks.map((b) => b.district))
+  })
+
+  it('puts the right buildings in the right district', () => {
+    for (const b of city.buildings) {
+      const d = city.districtAt(b.x, b.y)
+      if (b.kind === 'house') expect(d).toBe('suburbs')
+      if (b.kind === 'container' || b.kind === 'warehouse') expect(d).toBe('port')
+      if (b.kind === 'tower') expect(d).toBe('downtown')
+    }
+    const kinds = new Set(city.buildings.map((b) => b.kind))
+    expect([...kinds].sort()).toEqual(['container', 'house', 'tower', 'warehouse'])
+  })
+
+  it('never builds on a road', () => {
+    for (const b of city.buildings) {
+      for (let i = 0; i < city.NV; i++) expect(b.x1 <= city.vx[i] - city.vw[i] / 2 || b.x0 >= city.vx[i] + city.vw[i] / 2).toBe(true)
+      for (let j = 0; j < city.NH; j++) expect(b.y1 <= city.hy[j] - city.hw[j] / 2 || b.y0 >= city.hy[j] + city.hw[j] / 2).toBe(true)
+    }
+  })
+
+  it('makes the ring a wide highway that is entered only through the ramps', () => {
+    expect(city.vw[0]).toBe(36)
+    expect(city.vt[0]).toBe('highway')
+    const ring = (i: number, j: number) => city.nodeId(i, j)
+    for (let j = 1; j < city.NH - 1; j++) {
+      const toInterior = city.neighbors(ring(0, j)).includes(ring(1, j))
+      expect(toInterior).toBe(RAMPS.includes(j))
+      expect(city.neighbors(ring(1, j)).includes(ring(0, j))).toBe(RAMPS.includes(j)) // and the same in reverse
+    }
+    // ring nodes always connect along the ring
+    expect(city.neighbors(ring(0, 3))).toContain(ring(0, 2))
+    expect(city.neighbors(ring(0, 3))).toContain(ring(0, 4))
+  })
+
+  it('keeps every intersection reachable from the centre, highway included', () => {
+    const from = city.nodeId(8, 8)
+    let reachable = 0
+    for (let id = 0; id < city.nodeCount; id++) if (findPath(city, from, id)) reachable++
+    expect(reachable).toBe(city.nodeCount)
+    // a trip to a far ring corner must go via a ramp
+    const path = findPath(city, from, city.nodeId(0, 0))!
+    const entry = path.find((n, k) => k > 0 && (city.nodeId(0, 0) === n ? false : (n % city.NV === 0 || n % city.NV === city.NV - 1 || ((n / city.NV) | 0) === 0 || ((n / city.NV) | 0) === city.NH - 1)))!
+    expect(city.isRamp(entry % city.NV, (entry / city.NV) | 0)).toBe(true)
+  })
+
+  it('barricades the highway except at the ramps', () => {
+    const px = city.vx[0] + city.vw[0] / 2 + 0.6 // the barrier line along the left highway
+    const covers = (y: number) => city.barriers.some((b) => Math.abs(b.x - px) < 0.01 && Math.abs(y - b.y) <= b.hy)
+    expect(covers(city.hy[3])).toBe(true) // a plain street mouth is walled off
+    for (const j of RAMPS) expect(covers(city.hy[j])).toBe(false) // a ramp is open
+  })
+
+  it('barriers block line of sight (so cops route to a ramp) but ramps do not', () => {
+    const y3 = city.hy[3],
+      y4 = city.hy[4]
+    const xIn = city.vx[0] + city.vw[0] / 2 + 12 // inside the first block column
+    const xHwy = city.vx[0] + 6
+    expect(city.hasLOS(xHwy, y3, xIn, y3)).toBe(false) // across a plain street mouth: walled off
+    expect(city.hasLOS(xHwy, y4, xIn, y4)).toBe(true) // through the ramp opening: clear
   })
 })

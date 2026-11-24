@@ -93,6 +93,8 @@ export const Police = {
       const n = city.randomNode()
       const d = Math.hypot(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
       if (d < 180 || d > 420) continue
+      // fewer patrols out in the suburbs, plenty downtown and on the highway
+      if (city.districtAt(city.nodeX(n), city.nodeY(n)) === 'suburbs' && Math.random() < 0.6) continue
       const nb = city.neighbors(n)
       const to = nb[(Math.random() * nb.length) | 0]
       const p = city.lanePoint(n, to, 0.3)
