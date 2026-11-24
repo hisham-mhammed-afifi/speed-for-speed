@@ -1,5 +1,6 @@
 import { clamp } from '../core/math'
 import { avoid, speedTo, steerTo } from './drive'
+import { Memory } from './memory'
 import { findPath } from './pathfind'
 import { Tactics } from './tactics'
 import type { Intercept } from './tactics'
@@ -262,6 +263,14 @@ export const Police = {
       u.repath -= dt
       if (!u.path || u.repath <= 0) {
         u.repath = 1.5
+        // learned hideouts: once you have been out of sight for a while, units check the places you tend to hide
+        if (H.evade > 2 && u.goal === undefined && Math.random() < 0.7) {
+          const t = Memory.pick(H.lastX, H.lastY)
+          if (t) {
+            u.goal = city.nearestNode(t.x, t.y)
+            H.noteMemory(t.x, t.y)
+          }
+        }
         const s = city.nearestNode(car.x, car.y)
         // cops "hear" a nearby player: close ones head for the real position, far ones for the last sighting
         const g = u.goal !== undefined && dist > 220 ? u.goal : dist < 220 ? city.nearestNode(pl.x, pl.y) : city.nearestNode(H.lastX, H.lastY)
@@ -283,8 +292,14 @@ export const Police = {
           ny = city.nodeY(nid)
         } else if (Math.hypot(nx - car.x, ny - car.y) < 20) {
           // arrived: search a random node near the last known position
-          const g = city.randomNode()
-          if (Math.hypot(city.nodeX(g) - H.lastX, city.nodeY(g) - H.lastY) < 280) u.goal = g
+          const t = Math.random() < 0.7 ? Memory.pick(H.lastX, H.lastY) : null
+          if (t) {
+            u.goal = city.nearestNode(t.x, t.y)
+            H.noteMemory(t.x, t.y)
+          } else {
+            const g = city.randomNode()
+            if (Math.hypot(city.nodeX(g) - H.lastX, city.nodeY(g) - H.lastY) < 280) u.goal = g
+          }
           u.repath = 0
         }
       }

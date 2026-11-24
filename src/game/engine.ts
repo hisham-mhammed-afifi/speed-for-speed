@@ -19,6 +19,7 @@ import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
 import { createCity } from './world/city'
 import { Traffic } from './world/traffic'
+import { Memory } from './ai/memory'
 import { DISTRICT_NAMES } from './types'
 import type { CarKind, CarSpec, District, RunResult, RunStats, SaveData } from './types'
 import type { CameraMode } from './render/camera'
@@ -84,6 +85,7 @@ class GameEngine {
       heat.reset()
       this.saveData = loadSave()
       this.carIndex = Math.min(this.saveData.car, PLAYER_CARS.length - 1)
+      Memory.load(this.saveData.memory)
       store().setSave(this.saveData)
       store().setSelectedCar(this.carIndex)
       game.state = 'title'
@@ -200,6 +202,7 @@ class GameEngine {
     for (let i = 0; i < 160 && game.civs.length < Math.floor(Traffic.target * 0.7); i++) Traffic.spawn()
     for (let i = 0; i < 20; i++) Police.spawnAmbient()
     carGrid.rebuild(game.cars)
+    Memory.startRun()
     game.state = 'play'
     loop.paused = false
     input.clearOnce()
@@ -218,14 +221,26 @@ class GameEngine {
       this.saveData.best = Math.max(this.saveData.best, Math.floor(heat.bounty))
       this.saveData.longest = Math.max(this.saveData.longest, Math.floor(heat.time))
       stats.best = this.saveData.best
-      writeSave(this.saveData)
-      store().setSave({ ...this.saveData })
     }
+    // the police learn from every run: where you hid, and how well it worked
+    Memory.endRun(kind === 'escaped')
+    this.saveData.memory = Memory.save()
+    writeSave(this.saveData)
+    store().setSave({ ...this.saveData })
     game.state = 'result'
     loop.paused = true
     this.pushHud(true)
     store().setResult({ kind, stats })
     store().setScreen('result')
+  }
+
+  /** Forget everything the police have learned about your hiding places. */
+  resetMemory(): void {
+    Memory.clear()
+    this.saveData.memory = {}
+    writeSave(this.saveData)
+    store().setSave({ ...this.saveData })
+    game.toast('Police memory wiped', '#9ec5ff')
   }
 
   continueAfterEscape(): void {

@@ -70,6 +70,8 @@ export interface SaveData {
   total: number
   longest: number
   car: number
+  /** where the police remember you hiding: grid cell key -> seconds hidden (see ai/memory.ts) */
+  memory?: Record<string, number>
 }
 
 export interface Safe {

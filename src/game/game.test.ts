@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { findPath } from './ai/pathfind'
+import { CELL, HOT, Memory } from './ai/memory'
 import { predictRoute } from './ai/tactics'
 import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
 import { Car } from './physics/car'
@@ -459,5 +460,72 @@ describe('coordinated police tactics (plan 1)', () => {
         expect(e.dx * vx + e.dy * vy).toBeGreaterThan(0)
       }
     }
+  })
+})
+
+describe('police memory (plan 2)', () => {
+  beforeEach(() => Memory.clear())
+
+  it('records hidden time per cell and learns from a finished run', () => {
+    Memory.startRun()
+    Memory.recordHidden(100, 100, 6)
+    Memory.recordHidden(110, 90, 4) // same cell
+    Memory.recordHidden(500, 500, 2)
+    Memory.endRun(true)
+    expect(Memory.cells.get(Memory.keyAt(100, 100))).toBeCloseTo(10)
+    expect(Memory.cells.get(Memory.keyAt(500, 500))).toBeCloseTo(2)
+    expect(Memory.hot().map((c) => c.key)).toEqual([Memory.keyAt(100, 100)]) // only the 10 s cell is "hot"
+  })
+
+  it('learns half as much from a bust, and fades old knowledge each run', () => {
+    Memory.startRun()
+    Memory.recordHidden(100, 100, 10)
+    Memory.endRun(false)
+    expect(Memory.cells.get(Memory.keyAt(100, 100))).toBeCloseTo(5)
+    Memory.endRun(true) // nothing new: just decays
+    expect(Memory.cells.get(Memory.keyAt(100, 100))).toBeCloseTo(5 * 0.85)
+    for (let i = 0; i < 30; i++) Memory.endRun(true)
+    expect(Memory.cells.size).toBe(0) // forgotten
+  })
+
+  it('repeated escapes to the same spot make it hotter than a one-off', () => {
+    for (let r = 0; r < 3; r++) {
+      Memory.startRun()
+      Memory.recordHidden(300, 300, 8)
+      if (r === 2) Memory.recordHidden(900, 900, 8)
+      Memory.endRun(true)
+    }
+    const hot = Memory.hot()
+    expect(hot[0].key).toBe(Memory.keyAt(300, 300))
+    expect(hot[0].w).toBeGreaterThan(hot[hot.length - 1].w)
+  })
+
+  it('round-trips through the save format and ignores junk', () => {
+    Memory.startRun()
+    Memory.recordHidden(200, 400, 12)
+    Memory.endRun(true)
+    const saved = JSON.parse(JSON.stringify(Memory.save())) as Record<string, number>
+    Memory.clear()
+    Memory.load({ ...saved, 'bogus': 5, '1,2': -3, '3,4': NaN })
+    expect([...Memory.cells.keys()]).toEqual([Memory.keyAt(200, 400)])
+    expect(Memory.cells.get(Memory.keyAt(200, 400))).toBeCloseTo(12, 0)
+  })
+
+  it('picks a nearby hideout, ignores far ones, and the cell centre lies inside its cell', () => {
+    Memory.cells.set(Memory.keyAt(1000, 1000), 20)
+    Memory.cells.set(Memory.keyAt(5000, 5000), 50)
+    const t = Memory.pick(1100, 1050)
+    expect(t).not.toBeNull()
+    expect(Math.abs(t!.x - 1000)).toBeLessThan(CELL)
+    expect(Memory.pick(3000, 3000, 400)).toBeNull() // nothing within 400 m
+    Memory.cells.set(Memory.keyAt(2000, 2000), HOT - 1)
+    expect(Memory.pick(2000, 2000)).toBeNull() // too cold to matter
+  })
+
+  it('keeps the table bounded', () => {
+    Memory.startRun()
+    for (let i = 0; i < 300; i++) Memory.recordHidden(i * CELL, 0, 1 + (i % 7))
+    Memory.endRun(true)
+    expect(Memory.cells.size).toBeLessThanOrEqual(80)
   })
 })

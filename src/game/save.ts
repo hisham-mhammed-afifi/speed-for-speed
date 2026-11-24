@@ -2,7 +2,7 @@ import type { SaveData } from './types'
 
 const KEY = 'heatline.v1'
 
-export const DEFAULT_SAVE: SaveData = { best: 0, total: 0, longest: 0, car: 0 }
+export const DEFAULT_SAVE: SaveData = { best: 0, total: 0, longest: 0, car: 0, memory: {} }
 
 export function loadSave(): SaveData {
   try {

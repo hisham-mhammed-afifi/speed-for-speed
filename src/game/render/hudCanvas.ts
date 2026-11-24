@@ -1,4 +1,5 @@
 import { clamp } from '../core/math'
+import { Memory } from '../ai/memory'
 import { touch } from '../core/input'
 import { safe } from '../core/viewport'
 import { Phys } from '../physics/world'
@@ -217,6 +218,16 @@ function minimap(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
     ctx.arc(H.lastX, H.lastY, 60, 0, 6.283)
     ctx.stroke()
     ctx.setLineDash([])
+  }
+  if (H.active) {
+    // hideouts the police remember: faint rings
+    ctx.strokeStyle = 'rgba(106,183,255,0.45)'
+    ctx.lineWidth = 1.2 / k
+    for (const c of Memory.hot().slice(0, 6)) {
+      ctx.beginPath()
+      ctx.arc(c.x, c.y, 34, 0, 6.283)
+      ctx.stroke()
+    }
   }
   for (const s of H.spikes) dot(s.x, s.y, 3, '#ffb02e')
   const blink = Math.floor(game.time * 6) % 2

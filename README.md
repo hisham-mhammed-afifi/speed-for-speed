@@ -71,6 +71,10 @@ Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you 
 continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
 give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.
 
+Police memory (`ai/memory.ts`): the game counts how long you hide in each 80 m cell, learns from every run (escapes count double), and
+saves it with your progress. While you are out of sight the cops check your remembered hideouts first, and roadblocks and spike strips
+go on the street leading into one ahead of you. Faint rings on the minimap show what they remember; the pause menu has "Reset police memory".
+
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.
 

@@ -1,8 +1,10 @@
 import { clamp } from '../core/math'
 import { Phys } from '../physics/world'
 import { game } from '../state'
+import { Memory } from './memory'
 import { Police } from './police'
 import { Tactics } from './tactics'
+import { DISTRICT_NAMES } from '../types'
 import type { PoliceUnit } from './police'
 
 const THRESH = [0, 45, 110, 190, 290]
@@ -97,6 +99,7 @@ export class HeatManager {
   spawnT = 0
   roleT = 0
   tacticsT = 0
+  memToastT = 0
   /** coordinated tactics (interceptors); switchable so the AI can be compared with and without */
   tactics = true
   blockT = 0
@@ -123,6 +126,7 @@ export class HeatManager {
     this.spawnT = 0
     this.roleT = 0
     this.tacticsT = 0
+    this.memToastT = 0
     Tactics.reset()
     this.blockT = 15
     this.spikeT = 20
@@ -183,8 +187,66 @@ export class HeatManager {
     this.points += 2.5
   }
 
+  /** Radio chatter when the police act on what they remember about your hideouts (rate-limited). */
+  noteMemory(x: number, y: number): void {
+    if (this.memToastT > 0) return
+    this.memToastT = 25
+    game.toast('Dispatch: covering ' + DISTRICT_NAMES[game.city.districtAt(x, y)], '#6ab7ff')
+  }
+
+  /**
+   * Where to set a trap: on the street leading into a remembered hideout that lies roughly ahead of the player,
+   * otherwise a plain spot down the road ahead.
+   */
+  private trapSpot(dist: number): AheadSpot | null {
+    const city = game.city,
+      pl = game.player.car
+    if (pl.speed >= 8) {
+      const hx = pl.wvx / pl.speed,
+        hy = pl.wvy / pl.speed
+      let best: { x: number; y: number } | null = null,
+        bs = 0
+      for (const c of Memory.hot()) {
+        const dx = c.x - pl.x,
+          dy = c.y - pl.y,
+          d = Math.hypot(dx, dy)
+        if (d < 120 || d > 420) continue
+        const dot = (dx * hx + dy * hy) / d
+        if (dot < 0.6) continue
+        const sc = (c.w * dot) / (1 + d / 300)
+        if (sc > bs) {
+          bs = sc
+          best = c
+        }
+      }
+      if (best) {
+        const n = city.nearestNode(best.x, best.y)
+        let to = -1,
+          bd = 1e9
+        for (const m of city.neighbors(n)) {
+          const d = Math.hypot(city.nodeX(m) - pl.x, city.nodeY(m) - pl.y)
+          if (d < bd) {
+            bd = d
+            to = m
+          }
+        }
+        if (to >= 0) {
+          const x0 = city.nodeX(n),
+            y0 = city.nodeY(n),
+            x1 = city.nodeX(to),
+            y1 = city.nodeY(to)
+          const horiz = Math.abs(x1 - x0) > Math.abs(y1 - y0)
+          const w = horiz ? city.hw[nearestIdx(city.hy, y0)] : city.vw[nearestIdx(city.vx, x0)]
+          this.noteMemory(best.x, best.y)
+          return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, horiz, w }
+        }
+      }
+    }
+    return aheadSpot(dist)
+  }
+
   private placeRoadblock(): void {
-    const s = aheadSpot(220 + Math.random() * 60)
+    const s = this.trapSpot(220 + Math.random() * 60)
     if (!s) return
     const heavy = this.level >= 4
     const base = s.horiz ? Math.PI / 2 : 0
@@ -205,7 +267,7 @@ export class HeatManager {
   }
 
   private placeSpikes(): void {
-    const s = aheadSpot(150 + Math.random() * 50)
+    const s = this.trapSpot(150 + Math.random() * 50)
     if (!s) return
     const hx = s.horiz ? 0.8 : s.w * 0.45,
       hy = s.horiz ? s.w * 0.45 : 0.8
@@ -315,6 +377,8 @@ export class HeatManager {
       visible = true
     }
     this.visible = visible
+    if (!visible) Memory.recordHidden(pl.x, pl.y, dt)
+    if (this.memToastT > 0) this.memToastT -= dt
     if (visible) {
       this.lastX = pl.x
       this.lastY = pl.y
