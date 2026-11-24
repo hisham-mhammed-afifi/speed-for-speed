@@ -1,0 +1,24 @@
+import { useState } from 'react'
+import { engine } from '../../game/engine'
+
+export function PauseMenu() {
+  const [cameraMode, setCameraMode] = useState(engine.cameraMode)
+  const [debug, setDebug] = useState(engine.debug)
+
+  return (
+    <div className="screen dim">
+      <div className="panel">
+        <h2>Paused</h2>
+        <div className="menu">
+          <button className="primary" onClick={() => engine.togglePause()}>
+            Resume
+          </button>
+          <button onClick={() => setCameraMode(engine.toggleCameraMode())}>Camera: {cameraMode === 'north' ? 'North up' : 'Heading up'}</button>
+          <button onClick={() => setDebug(engine.toggleDebug())}>Debug overlay: {debug ? 'On' : 'Off'}</button>
+          <button onClick={() => engine.restart()}>Restart</button>
+          <button onClick={() => engine.toCarSelect()}>Change car</button>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,427 @@
+import { useGameStore, EMPTY_HUD } from '../store'
+import { heat } from './ai/heat'
+import { Police } from './ai/police'
+import { loadImages } from './core/assets'
+import { input, touch } from './core/input'
+import { loop, startLoop } from './core/loop'
+import { readSafeArea } from './core/viewport'
+import { ALL_CAR_FILES, PLAYER_CARS } from './data/cars'
+import { Car } from './physics/car'
+import { Phys } from './physics/world'
+import { camera } from './render/camera'
+import { FX } from './render/effects'
+import { drawHudCanvas, initHudMap } from './render/hudCanvas'
+import { Renderer } from './render/renderer'
+import { loadSave, writeSave } from './save'
+import { game } from './state'
+import { createCity } from './world/city'
+import { Traffic } from './world/traffic'
+import type { CarKind, CarSpec, RunResult, RunStats, SaveData } from './types'
+import type { CameraMode } from './render/camera'
+
+const store = () => useGameStore.getState()
+
+/**
+ * Owns the canvas, the fixed-step loop and the game flow (start, pause, results).
+ * React never touches the simulation directly: components call the methods below and read the zustand store.
+ */
+class GameEngine {
+  private canvas: HTMLCanvasElement | null = null
+  private ctx: CanvasRenderingContext2D | null = null
+  private W = 800
+  private H = 600
+  private dpr = 1
+  private titleT = 0
+  private hudT = 0
+  private carIndex = 0
+  private saveData: SaveData = loadSave()
+  private params = new URLSearchParams()
+  private assets: Promise<void> | null = null
+
+  /** Attach to a canvas and start the loop. Returns a function that detaches again (safe under React StrictMode). */
+  mount(canvas: HTMLCanvasElement): () => void {
+    this.canvas = canvas
+    this.ctx = canvas.getContext('2d')!
+    this.params = new URLSearchParams(location.search)
+    let stopLoop: (() => void) | null = null
+    let detached = false
+
+    const onResize = () => this.resize()
+    const onVisibility = () => {
+      // a phone call or app switch must not leave you driving blind into a bust
+      if (document.hidden && game.state === 'play') this.togglePause()
+    }
+    addEventListener('resize', onResize)
+    document.addEventListener('visibilitychange', onVisibility)
+    const detachInput = input.attach()
+    touch.onChange = () => {
+      store().setTouchActive(touch.active)
+      this.resize() // switching between touch and keyboard changes the resolution cap
+    }
+    store().setTouchActive(touch.active)
+
+    this.resize()
+    Renderer.init(this.ctx)
+    this.installGameHooks()
+
+    this.assets ??= loadImages(ALL_CAR_FILES, (p) => store().setLoadProgress(p)).then(() => {
+      game.city = createCity()
+      Phys.init(game.city)
+      initHudMap(game.city)
+    })
+    void this.assets.then(() => {
+      if (detached) return
+      game.heat = heat
+      heat.reset()
+      this.saveData = loadSave()
+      this.carIndex = Math.min(this.saveData.car, PLAYER_CARS.length - 1)
+      store().setSave(this.saveData)
+      store().setSelectedCar(this.carIndex)
+      game.state = 'title'
+      stopLoop = startLoop((dt) => this.update(dt), (alpha, dt) => this.render(alpha, dt))
+      if (this.params.has('auto')) {
+        const ci = parseInt(this.params.get('car') ?? '', 10)
+        this.startGame(Number.isNaN(ci) ? this.carIndex : Math.max(0, Math.min(PLAYER_CARS.length - 1, ci)))
+      } else {
+        store().setScreen('title')
+      }
+    })
+
+    return () => {
+      detached = true
+      stopLoop?.()
+      removeEventListener('resize', onResize)
+      document.removeEventListener('visibilitychange', onVisibility)
+      detachInput()
+      touch.onChange = null
+    }
+  }
+
+  // ---------------------------------------------------------------- world helpers (the `game` context)
+  private installGameHooks(): void {
+    game.spawnCar = (spec: CarSpec, x: number, y: number, theta: number, kind: CarKind) => {
+      const car = new Car(spec, kind)
+      Phys.addCar(car)
+      car.place(x, y, theta)
+      game.cars.push(car)
+      return car
+    }
+    game.removeCar = (car) => {
+      const i = game.cars.indexOf(car)
+      if (i >= 0) game.cars.splice(i, 1)
+      Phys.removeCar(car)
+    }
+    game.spotFree = (x, y, r) => {
+      for (let i = 0; i < game.cars.length; i++) if (Math.hypot(game.cars[i].x - x, game.cars[i].y - y) < r) return false
+      return !game.city.pointInBuilding(x, y)
+    }
+    game.toast = (text, color) => store().pushToast(text, color)
+    game.shake = (a) => camera.addShake(a)
+    game.endRun = (kind) => this.endRun(kind)
+    game.resetCar = () => this.resetCar()
+    game.onImpact = (a, b, dvA, dvB, x, y, nx, ny) => {
+      if (game.state !== 'play') return
+      const worst = Math.max(dvA, dvB)
+      if (worst > 1.5) FX.impact(x, y, nx, ny, worst)
+      // short per-car cooldown so one crash (contact, bounce, re-contact) only damages once
+      const hurt = (car: Car | null, dv: number) => {
+        if (!car || dv <= 3 || game.time - car.lastHit < 0.25) return
+        car.lastHit = game.time
+        car.health = Math.max(0, car.health - ((dv - 3) * 2.2) / car.spec.durability)
+      }
+      hurt(a, dvA)
+      hurt(b, dvB)
+      const pl = game.player.car
+      if (a === pl || b === pl) {
+        const dv = a === pl ? dvA : dvB
+        if (dv > 2) camera.addShake(Math.min(0.9, dv / 20))
+        const other = a === pl ? b : a
+        if (!other) return
+        if (other.kind === 'police' && !heat.active && dv > 1) heat.start('COLLISION')
+        else if (other.kind === 'civil' && dv > 3) {
+          if (heat.active) heat.onCivilCrash()
+          else if (game.cops.some((u) => u.state === 'patrol' && Math.hypot(u.car.x - pl.x, u.car.y - pl.y) < 140 && game.city.hasLOS(u.car.x, u.car.y, pl.x, pl.y)))
+            heat.start('RECKLESS DRIVING')
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- run control (called from React)
+  startGame(idx: number): void {
+    this.carIndex = idx
+    this.saveData.car = idx
+    writeSave(this.saveData)
+    store().setSave({ ...this.saveData })
+    store().setSelectedCar(idx)
+    game.cars.length = 0
+    game.civs.length = 0
+    game.cops.length = 0
+    Phys.reset()
+    FX.clearSkids()
+    heat.reset()
+    const city = game.city
+    const n = city.nodeId(8, 8),
+      nb = city.neighbors(n)
+    const to = nb[0]
+    const p = city.lanePoint(n, to, 0.5)
+    const spec = PLAYER_CARS[idx]
+    const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'player')
+    game.player = { car, spec }
+    game.time = 0
+    store().clearToasts()
+    camera.snap()
+    for (let i = 0; i < 40 && game.civs.length < 18; i++) Traffic.spawn()
+    for (let i = 0; i < 12; i++) Police.spawnAmbient()
+    game.state = 'play'
+    loop.paused = false
+    input.clearOnce()
+    this.hudT = 0
+    store().setHud(EMPTY_HUD)
+    store().setScreen('playing')
+    const lvl = parseInt(this.params.get('heat') ?? '', 10)
+    if (lvl >= 1) heat.start('DEBUG', Math.min(5, lvl))
+  }
+
+  private endRun(kind: RunResult): void {
+    if (game.state !== 'play') return
+    const stats: RunStats = { time: heat.time, level: heat.level, copsDown: heat.copsDown, bounty: heat.bounty, best: this.saveData.best }
+    if (kind === 'escaped') {
+      this.saveData.total += Math.floor(heat.bounty)
+      this.saveData.best = Math.max(this.saveData.best, Math.floor(heat.bounty))
+      this.saveData.longest = Math.max(this.saveData.longest, Math.floor(heat.time))
+      stats.best = this.saveData.best
+      writeSave(this.saveData)
+      store().setSave({ ...this.saveData })
+    }
+    game.state = 'result'
+    loop.paused = true
+    this.pushHud(true)
+    store().setResult({ kind, stats })
+    store().setScreen('result')
+  }
+
+  continueAfterEscape(): void {
+    const pl = game.player.car
+    heat.stop()
+    pl.health = 100
+    pl.flat = 0
+    pl.nitro = 1
+    game.state = 'play'
+    loop.paused = false
+    store().setScreen('playing')
+    game.toast('You lost them. Drive on.', '#7be08a')
+  }
+
+  togglePause(): void {
+    if (game.state === 'play') {
+      game.state = 'paused'
+      loop.paused = true
+      store().setScreen('paused')
+    } else if (game.state === 'paused') {
+      game.state = 'play'
+      loop.paused = false
+      store().setScreen('playing')
+    }
+  }
+
+  /** Back to the car-select screen (from the pause or result screen). */
+  toCarSelect(): void {
+    game.state = 'title'
+    game.player = null as unknown as typeof game.player
+    loop.paused = false
+    store().setScreen('select')
+  }
+
+  restart(): void {
+    this.startGame(this.carIndex)
+  }
+
+  toggleCameraMode(): CameraMode {
+    camera.mode = camera.mode === 'north' ? 'heading' : 'north'
+    return camera.mode
+  }
+
+  toggleDebug(): boolean {
+    Renderer.debug = !Renderer.debug
+    return Renderer.debug
+  }
+
+  get cameraMode(): CameraMode {
+    return camera.mode
+  }
+
+  get debug(): boolean {
+    return Renderer.debug
+  }
+
+  /** Snap the car onto the nearest road lane, facing along it. */
+  resetCar(): void {
+    const c = game.player.car,
+      city = game.city
+    const horiz = Math.abs(Math.cos(c.theta)) > Math.abs(Math.sin(c.theta))
+    if (horiz) {
+      let bj = 0,
+        bd = 1e9
+      for (let j = 0; j < city.NH; j++) {
+        const d = Math.abs(city.hy[j] - c.y)
+        if (d < bd) {
+          bd = d
+          bj = j
+        }
+      }
+      c.place(c.x, city.hy[bj] + (Math.cos(c.theta) > 0 ? 1 : -1) * city.hw[bj] * 0.25, Math.cos(c.theta) > 0 ? 0 : Math.PI)
+    } else {
+      let bi = 0,
+        bd = 1e9
+      for (let i = 0; i < city.NV; i++) {
+        const d = Math.abs(city.vx[i] - c.x)
+        if (d < bd) {
+          bd = d
+          bi = i
+        }
+      }
+      const down = Math.sin(c.theta) > 0
+      c.place(city.vx[bi] - (down ? 1 : -1) * city.vw[bi] * 0.25, c.y, down ? Math.PI / 2 : -Math.PI / 2)
+    }
+    camera.snap()
+  }
+
+  // ---------------------------------------------------------------- main update (fixed 120 Hz)
+  update(dt: number): void {
+    if (game.state !== 'play') return
+    game.time += dt
+    const pl = game.player.car,
+      city = game.city
+    const ctl = input.poll(dt)
+    const pc = pl.ctrl
+    pc.throttle = ctl.throttle
+    pc.brake = ctl.brake
+    pc.steer = ctl.steer
+    pc.handbrake = ctl.handbrake
+    pc.nitro = ctl.nitro
+    // Matter.js step: controls -> forces, integrate + resolve collisions, read state back
+    for (let i = 0; i < game.cars.length; i++) {
+      const c = game.cars[i]
+      c.applyControls(dt, city.surfaceAt(c.x, c.y))
+    }
+    Phys.step(dt)
+    for (let i = 0; i < game.cars.length; i++) game.cars[i].readBack()
+    if (game.state !== 'play') return // an impact may have ended the run
+    Traffic.update(dt)
+    Police.update(dt)
+    heat.update(dt)
+    for (let i = 0; i < game.cars.length; i++) {
+      const c = game.cars[i]
+      if (Math.abs(c.x - pl.x) < 90 && Math.abs(c.y - pl.y) < 90) FX.carEffects(c, dt)
+    }
+    FX.update(dt)
+    if (pl.health <= 0 && game.state === 'play') this.endRun('wrecked')
+  }
+
+  private handleKeys(): void {
+    if (input.pressed('KeyP') || input.pressed('Escape')) this.togglePause()
+    if (input.pressed('F3')) Renderer.debug = !Renderer.debug
+    if (game.state !== 'play') {
+      input.clearOnce()
+      return
+    }
+    if (input.pressed('KeyC')) this.toggleCameraMode()
+    if (input.pressed('KeyR')) this.resetCar()
+    if (input.pressed('KeyH') && !heat.active) heat.start('MANUAL', 1)
+    for (let n = 1; n <= 5; n++) {
+      if (input.pressed('Digit' + n) && this.params.has('debug')) {
+        if (heat.active) heat.points = [0, 45, 110, 190, 290][n - 1] + 0.01
+        else heat.start('DEBUG', n)
+      }
+    }
+  }
+
+  /** Push the heat / bounty numbers to React (about 10 times a second, and only when they changed). */
+  private pushHud(force = false): void {
+    const next = {
+      active: heat.active,
+      level: heat.level,
+      bounty: Math.floor(heat.active ? heat.bounty : 0),
+      visible: heat.visible,
+      evadeLeft: Math.round(Math.max(0, heat.evadeNeeded - heat.evade) * 10) / 10,
+      evadeFrac: heat.evadeNeeded ? Math.round((heat.evade / heat.evadeNeeded) * 100) / 100 : 0,
+      bust: Math.round(heat.bust * 100) / 100,
+      hint: game.time < 14 && !heat.active,
+    }
+    const cur = store().hud
+    if (force || (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== cur[k])) store().setHud(next)
+  }
+
+  private render(alpha: number, dt: number): void {
+    const ctx = this.ctx!
+    this.handleKeys()
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    ctx.fillStyle = '#0d0f12'
+    ctx.fillRect(0, 0, this.W, this.H)
+    if (game.player && (game.state === 'play' || game.state === 'paused' || game.state === 'result')) {
+      camera.update(dt, game.player.car, alpha, this.W, this.H)
+      camera.begin(ctx, this.W, this.H)
+      Renderer.drawWorld(ctx, camera, alpha)
+      camera.end(ctx)
+      drawHudCanvas(ctx, this.W, this.H, dt, camera)
+      this.hudT += dt
+      if (this.hudT >= 0.1) {
+        this.hudT = 0
+        this.pushHud()
+      }
+    } else if (game.city) {
+      // menu backdrop: slow flyover
+      this.titleT += dt
+      camera.x = 900 + Math.cos(this.titleT * 0.05) * 500
+      camera.y = 900 + Math.sin(this.titleT * 0.04) * 400
+      camera.angle = 0
+      camera.view = 110
+      camera.scale = Math.min(this.W, this.H) / camera.view
+      camera.shake = 0
+      camera.begin(ctx, this.W, this.H)
+      game.time += dt
+      Renderer.drawWorld(ctx, camera, 1)
+      camera.end(ctx)
+      ctx.fillStyle = 'rgba(5,7,10,0.55)'
+      ctx.fillRect(0, 0, this.W, this.H)
+    }
+  }
+
+  private resize(): void {
+    const canvas = this.canvas
+    if (!canvas) return
+    // phones are often 3x DPR; 1.5x looks the same in motion for a fraction of the pixels
+    this.dpr = Math.min(window.devicePixelRatio || 1, touch.active ? 1.5 : 2)
+    this.W = window.innerWidth
+    this.H = window.innerHeight
+    readSafeArea()
+    canvas.width = Math.round(this.W * this.dpr)
+    canvas.height = Math.round(this.H * this.dpr)
+    canvas.style.width = this.W + 'px'
+    canvas.style.height = this.H + 'px'
+  }
+
+  /** Ask for fullscreen + landscape on phones (Android honours it, iOS ignores it and still plays fine). */
+  goFullscreen(): void {
+    if (!touch.active) return
+    try {
+      const el = document.documentElement
+      const p = el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : null
+      if (p?.then) {
+        p.then(() => {
+          try {
+            const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
+            o?.lock?.('landscape').catch(() => {})
+          } catch {
+            /* ignore */
+          }
+        }).catch(() => {})
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export const engine = new GameEngine()

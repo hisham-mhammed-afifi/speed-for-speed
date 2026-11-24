@@ -1,15 +1,19 @@
 # HEATLINE
 
-An open-city police pursuit racer in HTML + JavaScript (Canvas 2D), with physics by
-[Matter.js](https://brm.io/matter-js/) 0.20.0 (MIT, vendored in `js/vendor/matter.min.js`). No build step.
+An open-city police pursuit racer. React + TypeScript (Vite) for the UI, Canvas 2D for the game world, and
+[Matter.js](https://brm.io/matter-js/) 0.20.0 for physics.
 
 ## Run it
-Double-click `index.html`, or serve the folder:
-
 ```
-python -m http.server 8765
+npm install
+npm run dev        # http://localhost:5173
+npm run build      # type-check + production build into dist/
+npm run preview    # serve the production build
+npm test           # unit tests (vitest)
+npm run lint       # oxlint
 ```
-then open http://localhost:8765. Useful URL flags: `?auto=1&car=0..8&heat=1..5` skips the menus and starts a pursuit; add `&debug` to jump heat levels with the 1-5 keys.
+URL flags: `?auto=1&car=0..8&heat=1..5` skips the menus and starts a pursuit; add `&debug` to jump heat levels with the 1-5 keys.
+`window.__HEATLINE__` (dev builds, or `?debug`) exposes the engine, game state and a `step(seconds)` helper for testing.
 
 ## Controls
 | Key | Action |
@@ -26,21 +30,36 @@ then open http://localhost:8765. Useful URL flags: `?auto=1&car=0..8&heat=1..5` 
 
 Gamepad: left stick, triggers, A = handbrake, X = nitro.
 
-### Phones / touch
-On-screen controls appear automatically on touch devices (and the game goes fullscreen + landscape where the browser allows it):
-- **Left thumb:** put it anywhere on the left side and slide left/right to steer (analog).
-- **Right thumb:** GAS, BRAKE (hold to reverse), DRIFT (handbrake) and NITRO.
-- **Top-left:** pause and reset-car buttons. The game also pauses by itself if you switch apps.
-Touch support lives in `js/ui/touch.js`; it feeds `HL.Input.poll()` like the keyboard and gamepad do.
+**Phones:** on-screen controls appear on touch devices: drag the left thumb to steer; the right thumb has GAS, BRAKE (hold to reverse),
+DRIFT and NITRO; top-left buttons pause and reset. The game asks for fullscreen + landscape where the browser allows it and pauses when you
+switch apps.
 
-## How it works
-- `js/physics/world.js` sets up the Matter.js engine (no gravity, 10 units per metre, stepped at 120 Hz). Buildings and
-  the city boundary are static bodies; every car is a dynamic body. Collision events report impacts to the game for
-  damage, sparks and police heat.
-- `js/physics/car.js` is an arcade car on top of a Matter body: each step it turns pedals and steering into an engine
-  force, a lateral-grip force (capped, so the car slides and drifts past the limit), drag, and a steering torque, then
-  reads the body's position and velocity back after Matter integrates. Gear and RPM shown on the gauges are cosmetic.
-- `js/data/cars.js` car specs (top speed, acceleration, grip, turning, mass, durability). Add or swap cars here.
-- `js/world/city.js` seeded procedural city (avenues, streets, alleys, parks, buildings) and road graph.
-- `js/ai/` A* pathfinding, AI steering, police units (flank / ram / block / PIT), and the heat system
-  (roadblocks at heat 3, spike strips at 4, a helicopter at 5).
+## Architecture
+React owns the UI; the game engine stays imperative (a fixed 120 Hz loop drawing to a canvas) so React never re-renders 60 times a second.
+They meet in a small zustand store.
+
+```
+src/
+  main.tsx, App.tsx          React entry; App picks the screen from the store
+  store.ts                   zustand: screen, result, save, HUD snapshot (~10 Hz), toasts, touch flag
+  ui/
+    GameCanvas.tsx           mounts the engine on the <canvas> (StrictMode-safe)
+    screens/                 Loading, Title, Help, CarSelect, PauseMenu, ResultScreen
+    hud/HudOverlay.tsx       heat stars, bounty, status, bust/evade meters, toasts, hints
+    touch/                   TouchControls (steering pad + buttons), useTouchMode
+  game/                      the engine: no React imports
+    engine.ts                GameEngine: loop, game flow (start/pause/results), the world context hooks
+    state.ts                 the shared `game` context every module reads (keeps imports cycle-free)
+    core/                    math, input (keyboard/gamepad/touch), loop, assets, viewport
+    data/cars.ts             car specs + car-select stats
+    physics/                 car.ts (arcade car on a Matter body), world.ts (Matter engine, impacts)
+    world/                   city.ts (procedural city, road graph), traffic.ts (lane drivers)
+    ai/                      pathfind (A*), drive, police units, heat (pursuit, roadblocks, spikes, helicopter)
+    render/                  camera, effects (particles, skid marks), renderer (world), hudCanvas (speedo, minimap)
+public/cars/                 car sprites
+```
+
+Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
+braking and reversing, and a wall crash.
+
+Deployed on Vercel: `vercel.json` runs `npm run build` and serves `dist/`.
