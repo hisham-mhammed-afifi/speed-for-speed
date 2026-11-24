@@ -78,6 +78,12 @@ on the picture so you can crash into its roofs; villas are tiled into streets of
 backgrounds, makes the grass tile, and writes the optimised WebP files (needs `sharp`, a dev dependency). Missing files fall back to the old
 procedural drawing.
 
+Performance: Matter.js only simulates static colliders within 450-520 m of the player (`Phys.streamStatics`, re-run every 0.5 s); the loop runs at
+most 4 physics steps per frame so a slow device slows down instead of freezing; cars and police think at 60 Hz (far civilians at 30 Hz); the
+speedometer dial, phone speed panel and minimap are cached offscreen. `render/quality.ts` has three tiers (high = 120 Hz physics and all effects;
+medium and low = 60 Hz physics, no shadows or glows, less traffic, lower canvas resolution). Phones start on medium; in auto the game steps down
+after 2 s of slow frames and back up after 8 s of headroom. Force one with `?quality=high|medium|low|auto` or the pause menu button (saved).
+
 Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you are heading (the road you are on and its straight
 continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
 give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.

@@ -7,7 +7,11 @@ const PREVENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Spa
 const st: Controls = { throttle: 0, brake: 0, steer: 0, handbrake: 0, nitro: 0 }
 const approach = (v: number, t: number, d: number) => (v < t ? Math.min(t, v + d) : Math.max(t, v - d))
 
+/** getGamepads() allocates an array on every call, so only ask once a pad has announced itself */
+let padSeen = false
+
 function pad(): Gamepad | null {
+  if (!padSeen) return null
   const gps = navigator.getGamepads ? navigator.getGamepads() : []
   for (const g of gps) if (g && g.connected) return g
   return null
@@ -55,10 +59,15 @@ export const input = {
     const blur = () => {
       for (const k in keys) keys[k] = false
     }
+    const padOn = () => {
+      padSeen = true
+    }
+    addEventListener('gamepadconnected', padOn)
     addEventListener('keydown', down)
     addEventListener('keyup', up)
     addEventListener('blur', blur)
     return () => {
+      removeEventListener('gamepadconnected', padOn)
       removeEventListener('keydown', down)
       removeEventListener('keyup', up)
       removeEventListener('blur', blur)

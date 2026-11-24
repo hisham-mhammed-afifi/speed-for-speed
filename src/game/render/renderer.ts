@@ -8,6 +8,7 @@ import type { camera as Camera } from './camera'
 import type { Car } from '../physics/car'
 import { BRIDGES, RIVER_I } from '../world/city'
 import { Props } from '../world/props'
+import { quality } from './quality'
 import { GRASS_FILES, LOTS, TREE_FILES, treeSpecies } from '../world/worldArt'
 import type { City } from '../world/city'
 import type { Heli, Spike } from '../ai/heat'
@@ -537,13 +538,15 @@ function drawTrees(ctx: CanvasRenderingContext2D, city: City, vis: Visible): voi
     const sprite = images[TREE_FILES[k]]
     if (sprite) {
       const d = p.r * 2.2 // canopy diameter in metres
-      const sh = treeShadow[k]
+      const sh = quality.spec.shadows ? treeShadow[k] : null
       if (sh) ctx.drawImage(sh, p.x - d / 2 + 1.6, p.y - d / 2 + 2, d, d)
-      ctx.save()
-      ctx.translate(p.x, p.y)
-      ctx.rotate(p.c * 97.3) // a top-down canopy can face any way: hides the repeats
-      ctx.drawImage(sprite, -d / 2, -d / 2, d, d)
-      ctx.restore()
+      if (quality.spec.rotateTrees) {
+        ctx.save()
+        ctx.translate(p.x, p.y)
+        ctx.rotate(p.c * 97.3) // a top-down canopy can face any way: hides the repeats
+        ctx.drawImage(sprite, -d / 2, -d / 2, d, d)
+        ctx.restore()
+      } else ctx.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d)
       continue
     }
     ctx.fillStyle = 'rgba(0,0,0,0.22)'
@@ -722,7 +725,7 @@ export const Renderer = {
     drawProps(ctx, vis)
     drawSpikes(ctx, game.heat.spikes)
     const blds = city.queryBuildings(vis.x0, vis.y0, vis.x1, vis.y1, qb)
-    drawShadows(ctx, blds)
+    if (quality.spec.shadows) drawShadows(ctx, blds)
 
     // cars
     const cars = game.cars
@@ -744,10 +747,11 @@ export const Renderer = {
       if (t) drawCarBody(ctx, cars[i], t.x, t.y, t.th)
     }
     FX.drawParticles(ctx, vis, false)
-    for (let i = 0; i < cars.length; i++) {
-      const t = interp[i]
-      if (t) drawCarLights(ctx, cars[i], t.x, t.y, t.th, game.time)
-    }
+    if (quality.spec.glow)
+      for (let i = 0; i < cars.length; i++) {
+        const t = interp[i]
+        if (t) drawCarLights(ctx, cars[i], t.x, t.y, t.th, game.time)
+      }
     FX.drawParticles(ctx, vis, true)
 
     drawTunnels(ctx, city, vis)

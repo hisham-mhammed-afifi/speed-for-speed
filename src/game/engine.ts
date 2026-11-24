@@ -21,6 +21,7 @@ import { Props } from './world/props'
 import { createCity, LANE_OFFSET } from './world/city'
 import { Traffic } from './world/traffic'
 import { Difficulty } from './ai/difficulty'
+import { quality } from './render/quality'
 import { Memory } from './ai/memory'
 import { DISTRICT_NAMES } from './types'
 import type { CarKind, CarSpec, District, RunResult, RunStats, SaveData } from './types'
@@ -42,6 +43,9 @@ class GameEngine {
   private hudT = 0
   private districtT = 0
   private propT = 0
+  private streamT = 0
+  /** frames drawn since the game froze (pause / result screens): the picture no longer changes, so stop redrawing it */
+  private idleFrames = 0
   private lastDistrict: District | null = null
   private carIndex = 0
   private saveData: SaveData = loadSave()
@@ -90,6 +94,8 @@ class GameEngine {
       this.carIndex = Math.min(this.saveData.car, PLAYER_CARS.length - 1)
       Memory.load(this.saveData.memory)
       Difficulty.load(this.saveData, this.params.get('skill'))
+      quality.onChange = () => this.applyQuality()
+      quality.configure(this.params.get('quality') ?? this.saveData.quality, touch.active)
       store().setSave(this.saveData)
       store().setSelectedCar(this.carIndex)
       game.state = 'title'
@@ -114,7 +120,27 @@ class GameEngine {
 
   /** Busy roads on desktop, a lighter city on phones so they keep 60 FPS. */
   private applyDensity(): void {
-    Traffic.target = touch.active ? 30 : 45
+    Traffic.target = Math.round((touch.active ? 30 : 45) * quality.spec.traffic)
+    Police.ambientTarget = quality.spec.patrols
+  }
+
+  /** Re-apply everything the quality tier controls (called when the tier changes). */
+  private applyQuality(): void {
+    Phys.radius = quality.spec.staticRadius
+    this.applyDensity()
+    this.resize()
+  }
+
+  /** Cycle the graphics setting (Auto > High > Medium > Low) and remember it. */
+  cycleQuality(): string {
+    quality.cycle(touch.active)
+    this.saveData.quality = quality.setting
+    writeSave(this.saveData)
+    return quality.label()
+  }
+
+  get qualityLabel(): string {
+    return quality.label()
   }
 
   // ---------------------------------------------------------------- world helpers (the `game` context)
@@ -198,6 +224,7 @@ class GameEngine {
     const spec = PLAYER_CARS[idx]
     const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'player')
     game.player = { car, spec }
+    if (Phys.streaming) Phys.streamStatics(p.x, p.y)
     game.time = 0
     this.lastDistrict = null
     this.districtT = 0
@@ -374,6 +401,11 @@ class GameEngine {
     if (game.state !== 'play') return // an impact may have ended the run
     carGrid.rebuild(game.cars)
     this.updateJumps()
+    this.streamT += dt
+    if (this.streamT >= 0.5 && Phys.streaming) {
+      this.streamT = 0
+      Phys.streamStatics(pl.x, pl.y)
+    }
     this.propT += dt
     if (this.propT >= 0.4) {
       Props.update(this.propT)
@@ -460,6 +492,10 @@ class GameEngine {
   private render(alpha: number, dt: number): void {
     const ctx = this.ctx!
     this.handleKeys()
+    if (game.state === 'play') quality.update(dt)
+    if (game.state === 'paused' || game.state === 'result') {
+      if (this.idleFrames++ > 3) return // a frozen world under a blurred menu: redrawing it every frame only costs battery
+    } else this.idleFrames = 0
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     ctx.fillStyle = '#0d0f12'
     ctx.fillRect(0, 0, this.W, this.H)
@@ -470,7 +506,7 @@ class GameEngine {
       camera.end(ctx)
       drawHudCanvas(ctx, this.W, this.H, dt, camera)
       this.hudT += dt
-      if (this.hudT >= 0.1) {
+      if (this.hudT >= 0.2) {
         this.hudT = 0
         this.pushHud()
       }
@@ -496,7 +532,7 @@ class GameEngine {
     const canvas = this.canvas
     if (!canvas) return
     // phones are often 3x DPR; 1.5x looks the same in motion for a fraction of the pixels
-    this.dpr = Math.min(window.devicePixelRatio || 1, touch.active ? 1.5 : 2)
+    this.dpr = Math.min(window.devicePixelRatio || 1, touch.active ? 1.5 : 2) * quality.dprScale
     this.W = window.innerWidth
     this.H = window.innerHeight
     readSafeArea()
@@ -504,6 +540,7 @@ class GameEngine {
     canvas.height = Math.round(this.H * this.dpr)
     canvas.style.width = this.W + 'px'
     canvas.style.height = this.H + 'px'
+    this.idleFrames = 0 // resizing clears the canvas, so draw again
   }
 
   /** Ask for fullscreen + landscape on phones (Android honours it, iOS ignores it and still plays fine). */

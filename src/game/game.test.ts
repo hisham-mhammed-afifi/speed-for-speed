@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { findPath } from './ai/pathfind'
 import { DEFAULT_RATING, Difficulty, scoreRun } from './ai/difficulty'
+import { loop, MAX_STEPS_PER_FRAME, startLoop, STEP } from './core/loop'
+import { LEVELS, quality, TIERS } from './render/quality'
 import { CELL, HOT, Memory } from './ai/memory'
 import { predictRoute } from './ai/tactics'
 import { fitScale, LOT_MAX_SCALE, LOTS, lotDims, lotRect, tileGrid, treeSpecies, WORLD_FILES } from './world/worldArt'
@@ -758,5 +760,155 @@ describe('photo art, lanes and landmark lots at real-world scale', () => {
         }
     }
     expect(seen.every((v) => v === 1)).toBe(true)
+  })
+})
+
+describe('performance: static streaming, loop budget, quality tiers, 60 Hz physics', () => {
+  const box = (x: number, y: number, hx: number, hy: number): Building => ({
+    x, y, theta: 0, hx, hy, kind: 'tower', x0: x - hx, y0: y - hy, x1: x + hx, y1: y + hy, height: 30, roof: '', wall: '', props: [], hasHeli: false, stamp: 0,
+  })
+  const carAt = (x: number, y: number, theta = 0): Car => {
+    const car = new Car(PLAYER_CARS[0], 'player')
+    Phys.addCar(car)
+    car.place(x, y, theta)
+    return car
+  }
+  const run = (car: Car, seconds: number, dt: number, ctrl: Partial<Car['ctrl']> = {}) => {
+    Object.assign(car.ctrl, { throttle: 0, brake: 0, steer: 0, handbrake: 0, nitro: 0 }, ctrl)
+    for (let i = 0; i < seconds / dt; i++) {
+      car.applyControls(dt, SURF.asphalt)
+      Phys.step(dt)
+      car.readBack()
+    }
+  }
+
+  it('only the static colliders near the player are in the physics world, and they follow the player around', () => {
+    const city = createCity()
+    Phys.init(city)
+    expect(Phys.statics.length).toBeGreaterThan(1000)
+    expect(Phys.staticCount()).toBeLessThan(Phys.statics.length)
+    for (const [x, y] of [
+      [0, 0],
+      [1000, 900],
+      [city.bounds.maxX, city.bounds.maxY],
+    ]) {
+      Phys.streamStatics(x, y)
+      for (const s of Phys.statics) {
+        const d = Math.hypot(Math.max(Math.abs(x - s.cx) - s.hx, 0), Math.max(Math.abs(y - s.cy) - s.hy, 0))
+        if (s.always || d <= Phys.radius) expect(s.on, 'near collider missing').toBe(true)
+        if (!s.always && d > Phys.radius + 80) expect(s.on, 'far collider still live').toBe(false)
+      }
+      expect(Phys.engine!.world.bodies.filter((b) => b.isStatic).length).toBe(Phys.staticCount()) // Matter agrees
+    }
+    expect(Phys.statics.filter((s) => s.always).every((s) => s.on)).toBe(true) // the boundary walls never leave
+  })
+
+  it('a building still stops a car after its collider has been streamed out and back in', () => {
+    const wall = box(100, 0, 20, 20)
+    Phys.init({ buildings: [wall], walls: [] })
+    Phys.streamStatics(9000, 9000)
+    expect(Phys.staticCount()).toBe(0) // far away: not simulated at all
+    const car = carAt(40, 0)
+    Phys.streamStatics(40, 0) // the player is back
+    expect(Phys.staticCount()).toBe(1)
+    car.setSpeed(100 / 3.6)
+    run(car, 3, 1 / 120)
+    expect(car.x + car.hx).toBeLessThanOrEqual(wall.x0 + 0.5)
+    expect(car.speed).toBeLessThan(2)
+  })
+
+  it('the loop never runs more than 4 physics steps for one frame, however late the frame is', () => {
+    let frame: FrameRequestCallback = () => {}
+    vi.stubGlobal('requestAnimationFrame', (f: FrameRequestCallback) => {
+      frame = f
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    loop.paused = false
+    loop.step = STEP
+    let steps = 0
+    const stop = startLoop(
+      () => steps++,
+      () => {},
+    )
+    const t0 = performance.now()
+    frame(t0 + 90) // a 90 ms frame: 10 steps' worth at 120 Hz
+    expect(steps).toBe(MAX_STEPS_PER_FRAME)
+    frame(t0 + 90 + 17) // the backlog was dropped, not carried over: a normal frame runs a normal number of steps
+    expect(steps - MAX_STEPS_PER_FRAME).toBeLessThanOrEqual(2)
+    stop()
+    vi.unstubAllGlobals()
+  })
+
+  it('quality: phones start in the middle, step down when slow, step up with headroom, and fixed tiers stay put', () => {
+    quality.configure('auto', true)
+    expect(quality.tier).toBe('medium')
+    expect(loop.step).toBeCloseTo(1 / 60, 6)
+    const start = quality.level
+    loop.frameMs = 33
+    loop.workMs = 22
+    for (let i = 0; i < 40; i++) quality.update(0.1) // 4 s of struggling
+    expect(quality.level).toBeGreaterThan(start)
+    const down = quality.level
+    loop.frameMs = 16.7
+    loop.workMs = 3
+    quality.noUp = 0
+    quality.cool = 0
+    for (let i = 0; i < 120; i++) quality.update(0.1) // 12 s of headroom
+    expect(quality.level).toBeLessThan(down)
+    quality.configure('auto', false)
+    expect(quality.tier).toBe('high')
+    expect(loop.step).toBeCloseTo(1 / 120, 6)
+    quality.configure('low', false)
+    const fixed = quality.level
+    loop.frameMs = 40
+    loop.workMs = 30
+    for (let i = 0; i < 100; i++) quality.update(0.1)
+    expect(quality.level).toBe(fixed)
+    expect(quality.spec.shadows).toBe(false)
+    quality.configure('auto', false)
+    loop.frameMs = 16.7
+    loop.workMs = 4
+  })
+
+  it('every tier is cheaper than the one above it', () => {
+    expect(TIERS.medium.traffic).toBeLessThan(TIERS.high.traffic)
+    expect(TIERS.low.traffic).toBeLessThan(TIERS.medium.traffic)
+    expect(TIERS.low.staticRadius).toBeLessThan(TIERS.medium.staticRadius)
+    expect(TIERS.medium.staticRadius).toBeLessThan(TIERS.high.staticRadius)
+    expect(TIERS.low.particles).toBeLessThan(TIERS.medium.particles)
+    for (let i = 1; i < LEVELS.length; i++) expect(LEVELS[i].dpr <= LEVELS[i - 1].dpr || LEVELS[i].tier !== LEVELS[i - 1].tier).toBe(true)
+  })
+
+  it('60 Hz physics keeps the car feel: same 0-100 time (within 10%) and still no tunnelling at 200 km/h', () => {
+    const t100 = (dt: number) => {
+      Phys.init({ buildings: [], walls: [] })
+      const car = carAt(0, 0)
+      car.ctrl.throttle = 1
+      let t = 0
+      while (car.speed * 3.6 < 100 && t < 10) {
+        car.applyControls(dt, SURF.asphalt)
+        Phys.step(dt)
+        car.readBack()
+        t += dt
+      }
+      return t
+    }
+    const a = t100(1 / 120),
+      b = t100(1 / 60)
+    expect(Math.abs(a - b) / a).toBeLessThan(0.1)
+    const wall = box(300, 0, 20, 20)
+    Phys.init({ buildings: [wall], walls: [] })
+    const car = carAt(100, 0)
+    car.setSpeed(200 / 3.6)
+    run(car, 4, 1 / 60)
+    expect(car.x + car.hx).toBeLessThanOrEqual(wall.x0 + 0.5)
+    // and a thin 1.2 m highway barrier is not tunnelled either
+    const bar: Building = box(300, 0, 0.6, 20)
+    Phys.init({ buildings: [bar], walls: [] })
+    const c2 = carAt(200, 0)
+    c2.setSpeed(200 / 3.6)
+    run(c2, 4, 1 / 60)
+    expect(c2.x).toBeLessThan(bar.x0 + 0.5)
   })
 })

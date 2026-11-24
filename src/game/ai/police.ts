@@ -44,6 +44,8 @@ export interface PoliceUnit {
 export const Police = {
   ambientTarget: 8,
   ambientTimer: 0,
+  /** steps counted, so police think at 60 Hz: half of the units on each step */
+  tick: 0,
 
   spawnUnit(x: number, y: number, theta: number, state: PoliceState, heavy: boolean): PoliceUnit {
     const spec = heavy ? POLICE_HEAVY : POLICE_SPEC
@@ -127,9 +129,11 @@ export const Police = {
     const H = game.heat,
       pl = game.player.car
     let patrolCount = 0
+    Police.tick++
     for (let i = game.cops.length - 1; i >= 0; i--) {
       const u = game.cops[i],
         car = u.car
+      const think = ((i + Police.tick) & 1) === 0 // this unit's controls are refreshed this step (the rest carry over)
       const d = Math.hypot(car.x - pl.x, car.y - pl.y)
       if (car.health <= 0 && u.state !== 'wrecked') {
         u.state = 'wrecked'
@@ -139,7 +143,7 @@ export const Police = {
       switch (u.state) {
         case 'patrol': {
           patrolCount++
-          u.driver!.control(car, dt)
+          if (think) u.driver!.control(car, dt * 2)
           u.detectT -= dt
           if (u.detectT <= 0 && !H.active) {
             u.detectT = 0.3
@@ -152,7 +156,7 @@ export const Police = {
           break
         }
         case 'pursue':
-          Police.pursue(u, dt, d)
+          if (think) Police.pursue(u, dt * 2, d)
           // too far to matter: drop it, the heat manager respawns pursuers closer
           if (d > 420 && !u.los) {
             game.removeCar(car)
@@ -160,7 +164,7 @@ export const Police = {
           }
           break
         case 'intercept':
-          Police.intercept(u, dt, d)
+          if (think) Police.intercept(u, dt * 2, d)
           if (d > 600) {
             game.removeCar(car)
             game.cops.splice(i, 1)

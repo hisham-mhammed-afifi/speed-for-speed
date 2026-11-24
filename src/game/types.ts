@@ -78,6 +78,8 @@ export interface SaveData {
   /** adaptive-difficulty wanted rating 0..1 and whether it is frozen (see ai/difficulty.ts) */
   skill?: number
   fixedSkill?: boolean
+  /** graphics setting: auto, high, medium or low (see render/quality.ts) */
+  quality?: string
 }
 
 export interface Safe {

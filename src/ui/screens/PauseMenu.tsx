@@ -6,6 +6,7 @@ export function PauseMenu() {
   const [debug, setDebug] = useState(engine.debug)
   const [wiped, setWiped] = useState(false)
   const [fixed, setFixed] = useState(engine.fixedSkill)
+  const [gfx, setGfx] = useState(engine.qualityLabel)
 
   return (
     <div className="screen dim">
@@ -18,6 +19,7 @@ export function PauseMenu() {
           <button onClick={() => setCameraMode(engine.toggleCameraMode())}>Camera: {cameraMode === 'north' ? 'North up' : 'Heading up'}</button>
           <button onClick={() => setDebug(engine.toggleDebug())}>Debug overlay: {debug ? 'On' : 'Off'}</button>
           <button onClick={() => setFixed(engine.toggleFixedSkill())}>Difficulty: {fixed ? 'Fixed' : 'Adaptive'}</button>
+          <button onClick={() => setGfx(engine.cycleQuality())}>Graphics: {gfx}</button>
           <button
             onClick={() => {
               engine.resetMemory()

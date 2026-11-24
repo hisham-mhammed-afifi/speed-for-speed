@@ -78,6 +78,86 @@ function gearLabel(): string {
   return String(pl.gear)
 }
 
+// ---- small cache helpers: HUD text and gauges are the slowest things on the canvas, so draw them rarely --------------------------
+
+interface Layer {
+  cv: HTMLCanvasElement
+  c: CanvasRenderingContext2D
+  w: number
+  h: number
+  dpr: number
+  key: string
+}
+
+/** An offscreen canvas of w x h CSS pixels at the given device-pixel ratio (reused while the size stays the same). */
+function layer(old: Layer | null, w: number, h: number, dpr: number): Layer {
+  if (old && old.w === w && old.h === h && old.dpr === dpr) return old
+  const cv = document.createElement('canvas')
+  cv.width = Math.max(1, Math.ceil(w * dpr))
+  cv.height = Math.max(1, Math.ceil(h * dpr))
+  const c = cv.getContext('2d')!
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return { cv, c, w, h, dpr, key: '' }
+}
+
+const deviceScale = (ctx: CanvasRenderingContext2D) => ctx.getTransform().a
+
+/** The bar's moving part only (its track lives in a cached layer). */
+function barFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, frac: number, col: string): void {
+  ctx.fillStyle = col
+  ctx.fillRect(x, y, w * clamp(frac, 0, 1), h)
+}
+
+// ---- speedometer: the dial (ticks, numbers, labels) is drawn once; every frame only the moving parts -------------------------
+let dialLayer: Layer | null = null
+
+function drawDial(c: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  const A0 = Math.PI * 0.75,
+    SW = Math.PI * 1.5,
+    MAX = 320
+  c.fillStyle = 'rgba(8,10,14,0.62)'
+  c.beginPath()
+  c.arc(cx, cy, r + 8, 0, 6.283)
+  c.fill()
+  arc(c, cx, cy, r, A0, A0 + SW, 5, 'rgba(255,255,255,0.15)')
+  c.font = '600 ' + Math.round(r * 0.11) + 'px "Segoe UI", sans-serif'
+  c.textAlign = 'center'
+  c.textBaseline = 'middle'
+  for (let v = 0; v <= MAX; v += 20) {
+    const a = A0 + (SW * v) / MAX,
+      big = v % 40 === 0
+    const r0 = r - (big ? 14 : 9),
+      r1 = r - 4
+    c.beginPath()
+    c.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
+    c.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
+    c.lineWidth = big ? 2 : 1
+    c.strokeStyle = 'rgba(255,255,255,0.55)'
+    c.stroke()
+    if (big) {
+      c.fillStyle = 'rgba(255,255,255,0.6)'
+      c.fillText(String(v), cx + Math.cos(a) * (r - 27), cy + Math.sin(a) * (r - 27))
+    }
+  }
+  arc(c, cx, cy, r * 0.62, A0, A0 + SW, 7, 'rgba(255,255,255,0.1)')
+  c.font = '600 ' + Math.round(r * 0.11) + 'px "Segoe UI", sans-serif'
+  c.fillStyle = 'rgba(255,255,255,0.6)'
+  c.fillText('KM/H', cx, cy + r * 0.2)
+  // the nitro / damage bars: labels and tracks
+  const bx = cx - r,
+    by = cy + r + 16,
+    bw = r * 2
+  c.font = '700 10px "Segoe UI", sans-serif'
+  c.textAlign = 'left'
+  c.textBaseline = 'alphabetic'
+  c.fillStyle = 'rgba(255,255,255,0.7)'
+  c.fillText('NITRO', bx, by - 3)
+  c.fillText('DMG', bx, by + 14)
+  c.fillStyle = 'rgba(255,255,255,0.12)'
+  c.fillRect(bx + 44, by - 9, bw - 44, 7)
+  c.fillRect(bx + 44, by + 8, bw - 44, 7)
+}
+
 function speedo(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
   const pl = game.player.car,
     s = pl.spec
@@ -85,39 +165,21 @@ function speedo(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number
   const A0 = Math.PI * 0.75,
     SW = Math.PI * 1.5,
     MAX = 320
+  // the static dial, from the cache
+  const pad = 10
+  dialLayer = layer(dialLayer, Math.ceil(2 * r + 2 * pad), Math.ceil(2 * r + 2 * pad + 50), deviceScale(ctx))
+  if (dialLayer.key !== String(r)) {
+    dialLayer.key = String(r)
+    dialLayer.c.clearRect(0, 0, dialLayer.w, dialLayer.h)
+    drawDial(dialLayer.c, r + pad, r + pad, r)
+  }
+  ctx.drawImage(dialLayer.cv, cx - r - pad, cy - r - pad, dialLayer.w, dialLayer.h)
+  // the moving parts
   ctx.save()
-  ctx.fillStyle = 'rgba(8,10,14,0.62)'
-  ctx.beginPath()
-  ctx.arc(cx, cy, r + 8, 0, 6.283)
-  ctx.fill()
-  arc(ctx, cx, cy, r, A0, A0 + SW, 5, 'rgba(255,255,255,0.15)')
   const f = clamp(kmh / MAX, 0, 1)
   arc(ctx, cx, cy, r, A0, A0 + SW * f, 5, f > 0.8 ? '#ff5a3c' : '#38d6ff')
-  // ticks
-  ctx.font = '600 ' + Math.round(r * 0.11) + 'px "Segoe UI", sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  for (let v = 0; v <= MAX; v += 20) {
-    const a = A0 + (SW * v) / MAX,
-      big = v % 40 === 0
-    const r0 = r - (big ? 14 : 9),
-      r1 = r - 4
-    ctx.beginPath()
-    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
-    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
-    ctx.lineWidth = big ? 2 : 1
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-    ctx.stroke()
-    if (big) {
-      ctx.fillStyle = 'rgba(255,255,255,0.6)'
-      ctx.fillText(String(v), cx + Math.cos(a) * (r - 27), cy + Math.sin(a) * (r - 27))
-    }
-  }
-  // rpm ring
   const rf = clamp(pl.rpm / s.redline, 0, 1.02)
-  arc(ctx, cx, cy, r * 0.62, A0, A0 + SW, 7, 'rgba(255,255,255,0.1)')
   arc(ctx, cx, cy, r * 0.62, A0, A0 + SW * Math.min(1, rf), 7, rf > 0.88 ? '#ff3b3b' : rf > 0.72 ? '#ffb02e' : '#e9eef5')
-  // needle
   const na = A0 + SW * f
   ctx.beginPath()
   ctx.moveTo(cx, cy)
@@ -125,60 +187,68 @@ function speedo(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number
   ctx.lineWidth = 3
   ctx.strokeStyle = '#ff5a3c'
   ctx.stroke()
-  // digits
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
   ctx.fillStyle = '#fff'
   ctx.font = '800 ' + Math.round(r * 0.34) + 'px "Segoe UI", sans-serif'
   ctx.fillText(String(Math.round(kmh)), cx, cy - r * 0.05)
-  ctx.font = '600 ' + Math.round(r * 0.11) + 'px "Segoe UI", sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText('KM/H', cx, cy + r * 0.2)
   ctx.fillStyle = pl.shiftT > 0 ? '#ffb02e' : '#fff'
   ctx.font = '800 ' + Math.round(r * 0.26) + 'px "Segoe UI", sans-serif'
   ctx.fillText(gearLabel(), cx, cy + r * 0.45)
   ctx.restore()
-  // bars
   const bx = cx - r,
     by = cy + r + 16,
     bw = r * 2
-  ctx.font = '700 10px "Segoe UI", sans-serif'
-  ctx.textAlign = 'left'
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'
-  ctx.fillText('NITRO', bx, by - 3)
-  bar(ctx, bx + 44, by - 9, bw - 44, 7, pl.nitro, pl.nitroOn ? '#9be7ff' : '#38b6ff')
-  ctx.fillText('DMG', bx, by + 14)
-  bar(ctx, bx + 44, by + 8, bw - 44, 7, pl.health / 100, pl.health > 50 ? '#7be08a' : pl.health > 25 ? '#ffb02e' : '#ff4a4a')
+  barFill(ctx, bx + 44, by - 9, bw - 44, 7, pl.nitro, pl.nitroOn ? '#9be7ff' : '#38b6ff')
+  barFill(ctx, bx + 44, by + 8, bw - 44, 7, pl.health / 100, pl.health > 50 ? '#7be08a' : pl.health > 25 ? '#ffb02e' : '#ff4a4a')
   if (pl.flat > 0) {
     ctx.fillStyle = '#ff4a4a'
+    ctx.font = '700 10px "Segoe UI", sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'alphabetic'
     ctx.fillText('FLAT TIRES ' + pl.flat.toFixed(0) + 's', bx, by + 32)
   }
 }
+
+// ---- phone speed panel: redrawn only when something it shows changed -----------------------------------------------------------
+let panelLayer: Layer | null = null
 
 /** Compact speed readout for phones (the round gauges are too big next to the touch buttons). */
 function touchPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number): void {
   const pl = game.player.car
   const h = 58
-  ctx.save()
-  ctx.fillStyle = 'rgba(8,10,14,0.62)'
-  ctx.beginPath()
-  ctx.roundRect(x, y, w, h, 10)
-  ctx.fill()
-  ctx.textBaseline = 'alphabetic'
-  ctx.textAlign = 'left'
-  ctx.fillStyle = '#fff'
-  ctx.font = '800 28px "Segoe UI", sans-serif'
-  const kmh = String(Math.round(pl.speed * 3.6))
-  ctx.fillText(kmh, x + 10, y + 29)
-  const tw = ctx.measureText(kmh).width
-  ctx.font = '700 10px "Segoe UI", sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText('KM/H', x + 14 + tw, y + 29)
-  ctx.textAlign = 'right'
-  ctx.fillStyle = pl.shiftT > 0 ? '#ffb02e' : '#fff'
-  ctx.font = '800 22px "Segoe UI", sans-serif'
-  ctx.fillText(gearLabel(), x + w - 10, y + 28)
-  bar(ctx, x + 10, y + 38, w - 20, 5, pl.nitro, pl.nitroOn ? '#9be7ff' : '#38b6ff')
-  bar(ctx, x + 10, y + 47, w - 20, 5, pl.health / 100, pl.health > 50 ? '#7be08a' : pl.health > 25 ? '#ffb02e' : '#ff4a4a')
-  ctx.restore()
+  panelLayer = layer(panelLayer, w, h, deviceScale(ctx))
+  const kmh = Math.round(pl.speed * 3.6)
+  const g = gearLabel()
+  const nitro = Math.round(pl.nitro * 50) // 2% steps are invisible on a 130 px bar
+  const hp = Math.round(pl.health / 2)
+  const key = [kmh, g, pl.shiftT > 0 ? 1 : 0, nitro, pl.nitroOn ? 1 : 0, hp].join('|')
+  if (panelLayer.key !== key) {
+    panelLayer.key = key
+    const c = panelLayer.c
+    c.clearRect(0, 0, w, h)
+    c.fillStyle = 'rgba(8,10,14,0.62)'
+    c.beginPath()
+    c.roundRect(0, 0, w, h, 10)
+    c.fill()
+    c.textBaseline = 'alphabetic'
+    c.textAlign = 'left'
+    c.fillStyle = '#fff'
+    c.font = '800 28px "Segoe UI", sans-serif'
+    const txt = String(kmh)
+    c.fillText(txt, 10, 29)
+    const tw = c.measureText(txt).width
+    c.font = '700 10px "Segoe UI", sans-serif'
+    c.fillStyle = 'rgba(255,255,255,0.6)'
+    c.fillText('KM/H', 14 + tw, 29)
+    c.textAlign = 'right'
+    c.fillStyle = pl.shiftT > 0 ? '#ffb02e' : '#fff'
+    c.font = '800 22px "Segoe UI", sans-serif'
+    c.fillText(g, w - 10, 28)
+    bar(c, 10, 38, w - 20, 5, pl.nitro, pl.nitroOn ? '#9be7ff' : '#38b6ff')
+    bar(c, 10, 47, w - 20, 5, pl.health / 100, pl.health > 50 ? '#7be08a' : pl.health > 25 ? '#ffb02e' : '#ff4a4a')
+  }
+  ctx.drawImage(panelLayer.cv, x, y, w, h)
   if (pl.flat > 0) {
     ctx.fillStyle = '#ff4a4a'
     ctx.font = '700 11px "Segoe UI", sans-serif'
@@ -187,7 +257,12 @@ function touchPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   }
 }
 
-function minimap(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, cam: typeof Camera): void {
+// ---- minimap: the map and dots are redrawn 20 times a second into a cache; the player arrow and ring stay live -----------------
+let miniLayer: Layer | null = null
+let miniAge = 1
+
+/** The map, pursuit markers and units (everything except the player arrow), centred on (cx, cy) with radius r. */
+function miniContent(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, cam: typeof Camera): void {
   const pl = game.player.car,
     H = game.heat
   const range = 240,
@@ -237,19 +312,33 @@ function minimap(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
     else dot(u.car.x, u.car.y, 3.2, u.state === 'patrol' ? '#6a8fd6' : blink ? '#ff3b3b' : '#4a7dff')
   }
   if (H.heli) dot(H.heli.x, H.heli.y, 4.5, '#ffffff')
-  // player arrow
+  ctx.restore()
+}
+
+function minimap(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, cam: typeof Camera, dt: number): void {
+  const pl = game.player.car
+  const size = Math.ceil(r * 2 + 4)
+  const fresh = !miniLayer || miniLayer.w !== size || miniLayer.dpr !== deviceScale(ctx)
+  miniLayer = layer(miniLayer, size, size, deviceScale(ctx))
+  miniAge += dt
+  if (fresh || miniAge >= 0.05) {
+    miniAge = 0
+    miniLayer.c.clearRect(0, 0, size, size)
+    miniContent(miniLayer.c, size / 2, size / 2, r, cam)
+  }
+  ctx.drawImage(miniLayer.cv, cx - size / 2, cy - size / 2, size, size)
+  // player arrow (always live): the map is rotated by the camera, the arrow by the car, so on screen it turns by both
   ctx.save()
-  ctx.translate(pl.x, pl.y)
-  ctx.rotate(pl.theta)
+  ctx.translate(cx, cy)
+  ctx.rotate(cam.angle + pl.theta)
   ctx.fillStyle = '#ffd23f'
   ctx.beginPath()
-  ctx.moveTo(7 / k, 0)
-  ctx.lineTo(-5 / k, 4.5 / k)
-  ctx.lineTo(-3 / k, 0)
-  ctx.lineTo(-5 / k, -4.5 / k)
+  ctx.moveTo(7, 0)
+  ctx.lineTo(-5, 4.5)
+  ctx.lineTo(-3, 0)
+  ctx.lineTo(-5, -4.5)
   ctx.closePath()
   ctx.fill()
-  ctx.restore()
   ctx.restore()
   ctx.lineWidth = 3
   ctx.strokeStyle = 'rgba(255,255,255,0.35)'
@@ -271,12 +360,12 @@ export function drawHudCanvas(ctx: CanvasRenderingContext2D, W: number, H: numbe
     // phone layout: speed panel beside the pause/reset buttons (top-left), small minimap top-right
     touchPanel(ctx, safe.l + 64, safe.t + 10, 150)
     const mr = clamp(Math.min(W, H) * 0.16, 50, 78)
-    minimap(ctx, W - safe.r - mr - 10, safe.t + mr + 10, mr, cam)
+    minimap(ctx, W - safe.r - mr - 10, safe.t + mr + 10, mr, cam, dt)
   } else {
     const r = 92 * s
     speedo(ctx, W - r - 28 * s, H - r - 62 * s, r)
     const mr = 88 * s
-    minimap(ctx, W - mr - 20 * s, mr + 20 * s, mr, cam)
+    minimap(ctx, W - mr - 20 * s, mr + 20 * s, mr, cam, dt)
   }
 
   if (Renderer.debug) {

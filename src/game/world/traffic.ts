@@ -8,6 +8,8 @@ import type { District } from '../types'
 import type { City } from './city'
 
 const nearScratch: Car[] = []
+/** the cars of units with sirens on, rebuilt each step (no per-step allocation) */
+const sirenScratch: Car[] = []
 
 /** How likely a candidate spawn point is accepted, per district (1 = always). */
 const TRAFFIC_WEIGHT: Record<District, number> = { downtown: 1, port: 0.55, suburbs: 0.45, highway: 0.8 }
@@ -129,19 +131,22 @@ export const Traffic = {
     Traffic.timer -= dt
     Traffic.tick++
     const pl = game.player.car
-    const sirens = game.heat.active ? game.cops.filter((u) => u.state === 'pursue' || u.state === 'intercept') : []
+    sirenScratch.length = 0
+    if (game.heat.active) for (const u of game.cops) if (u.state === 'pursue' || u.state === 'intercept') sirenScratch.push(u.car)
     const plFast = pl.speed > 18
     for (let i = game.civs.length - 1; i >= 0; i--) {
       const u = game.civs[i],
         car = u.car
       const d = Math.hypot(car.x - pl.x, car.y - pl.y)
-      // far-away civilians only think every other step; their last controls simply carry over
-      if (d > 250 && (Traffic.tick & 1) === 1 && car.health > 0) continue
+      // civilians think at 60 Hz (every other step), far ones at 30 Hz; their last controls simply carry over
+      const far = d > 250
+      if (((i + Traffic.tick) & (far ? 3 : 1)) !== 0 && car.health > 0) continue
+      const mult = far ? 4 : 2 // timers inside the driver run in 'think' time
 
       // pull over when a siren is close
       let siren = false
-      for (let k = 0; k < sirens.length; k++) {
-        const c = sirens[k].car
+      for (let k = 0; k < sirenScratch.length; k++) {
+        const c = sirenScratch[k]
         const ddx = c.x - car.x,
           ddy = c.y - car.y
         if (ddx * ddx + ddy * ddy < 1600) {
@@ -162,14 +167,14 @@ export const Traffic = {
         const lat = -rx * s + ry * c // + = player is to our right
         if (Math.abs(ahead) < 35 && Math.abs(lat) < 5) wantNudge = -Math.sign(lat || 1) * Math.min(2.2, 0.6 + ((35 - Math.abs(ahead)) / 35) * 1.6)
       }
-      u.driver.nudge += (wantNudge - u.driver.nudge) * Math.min(1, 4 * dt * 2)
+      u.driver.nudge += (wantNudge - u.driver.nudge) * Math.min(1, 4 * dt * mult)
 
-      u.driver.control(car, d > 250 ? dt * 2 : dt) // far civilians skip every other step, so their timers run double
+      u.driver.control(car, dt * mult)
       if (d > 420 || u.driver.stuck > 7 || car.health <= 0) {
         if (car.health <= 0 && d < 120) {
           car.ctrl.throttle = 0
           car.ctrl.brake = 0.4
-          u.dead = (u.dead || 0) + dt
+          u.dead = (u.dead || 0) + dt * mult
           if (u.dead < 8) continue
         }
         game.removeCar(car)

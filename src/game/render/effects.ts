@@ -1,3 +1,4 @@
+import { quality } from './quality'
 import type { Car } from '../physics/car'
 import type { Vec2 } from '../types'
 
@@ -115,6 +116,7 @@ export const FX = {
   },
 
   smoke(x: number, y: number, vx: number, vy: number, size: number, alpha: number, dark = false): void {
+    if (quality.spec.particles < 1 && Math.random() > quality.spec.particles) return
     emit(0, x, y, vx + (Math.random() - 0.5) * 1.2, vy + (Math.random() - 0.5) * 1.2, 0.9 + Math.random() * 0.8, size, 2.2, alpha, dark ? 'dark' : 'smoke')
   },
   spark(x: number, y: number, vx: number, vy: number): void {

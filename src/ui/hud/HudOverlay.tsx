@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useGameStore } from '../../store'
 
@@ -21,13 +21,13 @@ const STAR_POINTS = Array.from({ length: 10 }, (_, i) => {
   return `${(16 + Math.cos(a) * r).toFixed(2)},${(16 + Math.sin(a) * r).toFixed(2)}`
 }).join(' ')
 
-function Star({ lit }: { lit: boolean }) {
+const Star = memo(function Star({ lit }: { lit: boolean }) {
   return (
     <svg className={lit ? 'star lit' : 'star'} viewBox="0 0 32 32" aria-hidden>
       <polygon points={STAR_POINTS} />
     </svg>
   )
-}
+})
 
 /**
  * Heat stars, bounty, pursuit status, bust / evade meters, event toasts and the first-seconds hint.

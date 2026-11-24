@@ -23,33 +23,101 @@ interface PairCollision {
 
 const vel = { x: 0, y: 0 }
 
+/** A static collider and where it is (axis-aligned, metres), so it can be streamed in and out of the world. */
+interface StaticRec {
+  body: Matter.Body
+  cx: number
+  cy: number
+  hx: number
+  hy: number
+  always: boolean
+  on: boolean
+}
+
+/** Static colliders within this many metres of the player are live. Traffic despawns at 420 m, pursuers at 420-700 m. */
+const STATIC_RADIUS = 520
+
 export const Phys = {
   S,
   engine: null as Matter.Engine | null,
   cars: [] as Car[],
 
-  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[]; waterWalls?: Wall[] }): void {
-    const engine = Engine.create({ positionIterations: 8, velocityIterations: 6, enableSleeping: false })
+  /** every static collider in the city; only those near the player are actually in the Matter world (see streamStatics) */
+  statics: [] as StaticRec[],
+
+  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[]; waterWalls?: Wall[] }, stream = true): void {
+    // Matter's default solver iterations (6 / 4) are plenty for arcade cars and noticeably cheaper than 8 / 6
+    const engine = Engine.create({ positionIterations: 6, velocityIterations: 4, enableSleeping: false })
     engine.gravity.x = 0
     engine.gravity.y = 0
     engine.gravity.scale = 0
     Phys.engine = engine
     Phys.cars = []
-    const statics: Matter.Body[] = []
-    const add = (cx: number, cy: number, hx: number, hy: number) =>
-      statics.push(Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, {
+    const recs: StaticRec[] = []
+    const add = (cx: number, cy: number, hx: number, hy: number, always: boolean) =>
+      recs.push({
+        body: Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, {
           isStatic: true,
           friction: 0.3,
           restitution: 0.15,
           label: 'static',
           collisionFilter: { category: CAT_STATIC, mask: 0xffff },
-        }))
-    for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy)
-    for (const w of city.walls) add(w.x, w.y, w.hx, w.hy)
-    for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy)
-    for (const w of city.waterWalls ?? []) add(w.x, w.y, w.hx, w.hy)
-    Composite.add(engine.world, statics)
+        }),
+        cx,
+        cy,
+        hx,
+        hy,
+        always,
+        on: false,
+      })
+    for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy, false)
+    for (const w of city.walls) add(w.x, w.y, w.hx, w.hy, true) // the four boundary walls: always there
+    for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy, false)
+    for (const w of city.waterWalls ?? []) add(w.x, w.y, w.hx, w.hy, false)
+    Phys.statics = recs
+    Phys.streaming = stream
     Events.on(engine, 'collisionStart', onCollisionStart)
+    Phys.streamStatics(0, 0, stream ? Phys.radius : Infinity)
+  },
+
+  /** false in tests that want every static collider in the world at all times */
+  streaming: true,
+  /** metres around the player in which static colliders are live (quality tiers adjust this) */
+  radius: STATIC_RADIUS,
+
+  /**
+   * Keep only the static colliders near (x, y) in the physics world. Matter sweeps every static body every step, and the whole
+   * city has over a thousand of them; the moving cars are all within a few hundred metres of the player, so the rest are dead weight.
+   * Colliders enter at `radius` and leave at `radius + 80` (hysteresis, so nothing flickers at the edge).
+   */
+  streamStatics(x: number, y: number, radius?: number): void {
+    const world = Phys.engine?.world
+    if (!world) return
+    const R: number = radius ?? Phys.radius
+    const add: Matter.Body[] = [],
+      remove: Matter.Body[] = []
+    for (let i = 0; i < Phys.statics.length; i++) {
+      const s = Phys.statics[i]
+      const dx = Math.max(Math.abs(x - s.cx) - s.hx, 0),
+        dy = Math.max(Math.abs(y - s.cy) - s.hy, 0)
+      const d = Math.hypot(dx, dy)
+      if (!s.on && (s.always || d <= R)) {
+        s.on = true
+        add.push(s.body)
+      } else if (s.on && !s.always && d > R + 80) {
+        s.on = false
+        remove.push(s.body)
+      }
+    }
+    if (add.length) Composite.add(world, add)
+    if (remove.length) Composite.remove(world, remove)
+  },
+
+  /** how many static colliders are currently in the physics world */
+  staticCount(): number {
+    let n = 0
+    for (const s of Phys.statics) if (s.on) n++
+    return n
   },
 
   addCar(car: Car): void {
