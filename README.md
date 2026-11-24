@@ -67,10 +67,14 @@ and the helicopter, launch ramps (go fast enough and you fly; cops can't follow 
 gravel and smashable cones, sawhorses and park fences (smash one while wanted for a small bounty). Props are streamed in as light
 physics bodies near the player, so the world stays cheap.
 
+Scale: one world unit is one metre. Cars are 4.5-5 m long and 1.9 m wide; lanes are about 3.6 m (streets 11 m, avenues 18 m, highway 28 m with a
+3 m median, alleys 6 m) and traffic drives in `LANE_OFFSET[roadType]`. Grass tiles cover 4 m, tree canopies are about 4-12 m, and landmark
+photo lots are drawn at the size measured from the cars in the pictures (villa 55 m wide, residence 74 m, campus 120 m), never stretched.
+
 Photo art (`public/world/`, drawn by `render/renderer.ts`, listed in `world/worldArt.ts`): top-down tree sprites (8 species, shadows baked from
 their silhouettes), seamless grass textures for parks and suburbs lawns, and a few landmark lots (a villa in the suburbs, an office campus in the
-port, a green-roof residence downtown). A lot is a photo laid over a block, turned and mirrored per placement, with collider rectangles measured
-on the picture so you can crash into its roofs. The source JPGs are not in the repo: `node scripts/build-assets.mjs "<folder>"` cuts out the
+port, a green-roof residence downtown). A lot is a photo laid over part of a block, turned and mirrored per placement, with collider rectangles measured
+on the picture so you can crash into its roofs; villas are tiled into streets of three or four, and the rest of the block gets ordinary buildings. The source JPGs are not in the repo: `node scripts/build-assets.mjs "<folder>"` cuts out the
 backgrounds, makes the grass tile, and writes the optimised WebP files (needs `sharp`, a dev dependency). Missing files fall back to the old
 procedural drawing.
 

@@ -61,7 +61,7 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
     // each district has its own ground: grey concrete downtown, dark port concrete, lawns in the suburbs
     ctx.fillStyle = bl.type === 'park' ? pat.grass : bl.district === 'suburbs' ? pat.lawn : bl.district === 'port' ? pat.port : bl.type === 'plaza' ? pat.plaza : pat.lot
     ctx.fillRect(bl.x0 + 3, bl.y0 + 3, bl.x1 - bl.x0 - 6, bl.y1 - bl.y0 - 6)
-    if (bl.lot) drawLot(ctx, bl.lot)
+    if (bl.lots) for (const lot of bl.lots) drawLot(ctx, lot)
     ctx.strokeStyle = 'rgba(0,0,0,0.35)'
     ctx.lineWidth = 0.3
     ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
@@ -116,20 +116,22 @@ function drawRoadSeg(ctx: CanvasRenderingContext2D, horiz: boolean, c: number, w
   ctx.setLineDash([])
   ctx.strokeStyle = '#e8e8e8'
   ctx.lineWidth = 0.16
-  roadLine(ctx, horiz, c - w / 2 + 0.6, a0, a1)
-  roadLine(ctx, horiz, c + w / 2 - 0.6, a0, a1)
+  // lanes are about 3.6 m: streets mark off a parking strip, avenues a kerb lane, the highway a hard shoulder
+  const edge = type === 'street' ? 3.6 : type === 'avenue' ? w / 2 - 1.8 : w / 2 - 1.7
+  roadLine(ctx, horiz, c - edge, a0, a1)
+  roadLine(ctx, horiz, c + edge, a0, a1)
   if (type === 'highway') {
-    // grass-free median strip with yellow edges, then three dashed lanes each way
+    // 3 m median with yellow edges, then three dashed lanes each way
     ctx.strokeStyle = '#2b2d31'
-    ctx.lineWidth = 1.6
+    ctx.lineWidth = 3
     roadLine(ctx, horiz, c, a0, a1)
     ctx.strokeStyle = '#e0b92a'
     ctx.lineWidth = 0.18
-    roadLine(ctx, horiz, c - 1, a0, a1)
-    roadLine(ctx, horiz, c + 1, a0, a1)
+    roadLine(ctx, horiz, c - 1.5, a0, a1)
+    roadLine(ctx, horiz, c + 1.5, a0, a1)
     ctx.strokeStyle = 'rgba(240,240,240,0.85)'
     ctx.setLineDash([4, 6])
-    for (const o of [5.2, 10.4]) {
+    for (const o of [5.1, 8.7]) {
       roadLine(ctx, horiz, c - o, a0, a1)
       roadLine(ctx, horiz, c + o, a0, a1)
     }
@@ -140,8 +142,8 @@ function drawRoadSeg(ctx: CanvasRenderingContext2D, horiz: boolean, c: number, w
     roadLine(ctx, horiz, c + 0.25, a0, a1)
     ctx.strokeStyle = 'rgba(240,240,240,0.85)'
     ctx.setLineDash([3, 5])
-    roadLine(ctx, horiz, c - w / 4, a0, a1)
-    roadLine(ctx, horiz, c + w / 4, a0, a1)
+    roadLine(ctx, horiz, c - 3.6, a0, a1)
+    roadLine(ctx, horiz, c + 3.6, a0, a1)
   } else {
     ctx.strokeStyle = '#e0b92a'
     ctx.lineWidth = 0.17
@@ -534,7 +536,7 @@ function drawTrees(ctx: CanvasRenderingContext2D, city: City, vis: Visible): voi
     const k = treeSpecies(p.c)
     const sprite = images[TREE_FILES[k]]
     if (sprite) {
-      const d = p.r * 2.5 // canopy diameter in metres
+      const d = p.r * 2.2 // canopy diameter in metres
       const sh = treeShadow[k]
       if (sh) ctx.drawImage(sh, p.x - d / 2 + 1.6, p.y - d / 2 + 2, d, d)
       ctx.save()
@@ -703,8 +705,8 @@ export const Renderer = {
       }
       return p
     }
-    pat.grass = photo(GRASS_FILES.meadow, 14) ?? pat.grass
-    pat.lawn = photo(GRASS_FILES.lawn, 14) ?? pat.lawn
+    pat.grass = photo(GRASS_FILES.meadow, 4) ?? pat.grass
+    pat.lawn = photo(GRASS_FILES.lawn, 4) ?? pat.lawn
     bakeTreeShadows()
   },
 

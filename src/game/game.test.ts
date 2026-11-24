@@ -3,13 +3,13 @@ import { findPath } from './ai/pathfind'
 import { DEFAULT_RATING, Difficulty, scoreRun } from './ai/difficulty'
 import { CELL, HOT, Memory } from './ai/memory'
 import { predictRoute } from './ai/tactics'
-import { fitLot, LOTS, lotRect, treeSpecies, WORLD_FILES } from './world/worldArt'
+import { fitScale, LOT_MAX_SCALE, LOTS, lotDims, lotRect, tileGrid, treeSpecies, WORLD_FILES } from './world/worldArt'
 import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
 import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
-import { BRIDGES, createCity, RAMPS, RIVER_I, SURF } from './world/city'
+import { BRIDGES, createCity, LANE_OFFSET, RAMPS, RIVER_I, SURF } from './world/city'
 import type { Building } from './types'
 
 const DT = 1 / 120
@@ -262,7 +262,7 @@ describe('city districts (plan 5)', () => {
   })
 
   it('makes the ring a wide highway that is entered only through the ramps', () => {
-    expect(city.vw[0]).toBe(36)
+    expect(city.vw[0]).toBe(28)
     expect(city.vt[0]).toBe('highway')
     const ring = (i: number, j: number) => city.nodeId(i, j)
     for (let j = 1; j < city.NH - 1; j++) {
@@ -615,9 +615,10 @@ describe('adaptive difficulty (plan 3)', () => {
   })
 })
 
-describe('photo art and landmark lots', () => {
+describe('photo art, lanes and landmark lots at real-world scale', () => {
   const city = createCity()
-  const lots = city.blocks.filter((b) => b.lot)
+  const lotBlocks = city.blocks.filter((b) => b.lots && b.lots.length)
+  const allLots = lotBlocks.flatMap((b) => b.lots!.map((l) => ({ b, l })))
 
   it('every art file the game loads exists in public/', () => {
     const found = Object.keys(import.meta.glob('/public/world/**/*.webp'))
@@ -630,40 +631,108 @@ describe('photo art and landmark lots', () => {
     expect([...used].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
 
+  it('lanes are about 3.6 m: the lane centre sits inside its half of every road, with room for a car', () => {
+    for (const t of ['highway', 'avenue', 'street', 'alley'] as const) {
+      const w = { highway: 28, avenue: 18, street: 11, alley: 6 }[t]
+      const lane = LANE_OFFSET[t]
+      expect(lane).toBeGreaterThan(0.9) // a 1.9 m car doesn't straddle the centre line
+      expect(lane + 0.95).toBeLessThan(w / 2) // and doesn't hang over the kerb
+    }
+    // laneOffset follows the edge's road type
+    const a = city.nodeId(3, 4),
+      b = city.nodeId(4, 4)
+    expect(city.laneOffset(a, b)).toBe(LANE_OFFSET[city.ht[4]])
+    expect(city.laneOffset(city.nodeId(4, 3), city.nodeId(4, 4))).toBe(LANE_OFFSET[city.vt[4]])
+  })
+
+  it('lane points are on the right-hand side of the road, inside it', () => {
+    for (let k = 0; k < 40; k++) {
+      const n = city.randomNode()
+      for (const m of city.neighbors(n)) {
+        const p = city.lanePoint(n, m, 0.5)
+        expect(city.laneOffset(n, m)).toBeLessThan(city.edgeWidth(n, m) / 2)
+        // offset is to the right of the direction of travel (y down): (-uy, ux)
+        const cx = (city.nodeX(n) + city.nodeX(m)) / 2,
+          cy = (city.nodeY(n) + city.nodeY(m)) / 2
+        const side = (p.x - cx) * -p.uy + (p.y - cy) * p.ux
+        expect(side).toBeGreaterThan(0)
+      }
+    }
+  })
+
   it('places each kind of lot in its own district, deterministically', () => {
-    expect(lots.length).toBeGreaterThan(0)
+    expect(allLots.length).toBeGreaterThan(0)
     for (const art of Object.values(LOTS)) {
-      const mine = lots.filter((b) => b.lot!.art === art.id)
+      const mine = lotBlocks.filter((b) => b.lots![0].art === art.id)
       expect(mine.length).toBeGreaterThan(0)
       expect(mine.length).toBeLessThanOrEqual(art.count)
       for (const b of mine) expect(b.district).toBe(art.district)
     }
-    const again = createCity().blocks.filter((b) => b.lot).map((b) => [b.i, b.j, b.lot!.art, b.lot!.rot, b.lot!.flipX, b.lot!.flipY])
-    expect(again).toEqual(lots.map((b) => [b.i, b.j, b.lot!.art, b.lot!.rot, b.lot!.flipX, b.lot!.flipY]))
+    const sig = (c: ReturnType<typeof createCity>) => c.blocks.filter((b) => b.lots).map((b) => [b.i, b.j, b.lots!.map((l) => [l.art, l.rot, l.flipX, l.flipY, Math.round(l.x0), Math.round(l.y0)])])
+    expect(sig(createCity())).toEqual(sig(city))
   })
 
-  it('lots only take blocks they fit without much stretching', () => {
-    for (const b of lots) {
-      const L = b.lot!
-      const fit = fitLot(LOTS[L.art], L.x0, L.y0, L.x1, L.y1)
-      expect(fit).not.toBeNull()
-      expect(fit!.rot).toBe(L.rot)
-      expect(fit!.distortion).toBeLessThan(1.4)
+  it('lots are drawn at their real-world size, never stretched', () => {
+    for (const { l } of allLots) {
+      const art = LOTS[l.art]
+      const w = l.x1 - l.x0,
+        h = l.y1 - l.y0
+      const [rw, rh] = l.rot ? [h, w] : [w, h]
+      expect(rw / rh).toBeCloseTo(art.aspect, 3) // aspect ratio untouched
+      const s = rw / art.metresWide
+      expect(s).toBeGreaterThanOrEqual(art.minScale - 1e-6)
+      expect(s).toBeLessThanOrEqual(LOT_MAX_SCALE + 1e-6)
     }
   })
 
-  it('lot colliders are flat buildings that stay inside their block, off the roads', () => {
-    for (const b of lots) {
-      const mine = city.buildings.filter((q) => q.flat && q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)
-      expect(mine.length).toBe(LOTS[b.lot!.art].parts.length)
-      for (const q of mine) {
-        expect(q.hasHeli).toBe(false)
-        expect(q.x1).toBeGreaterThan(q.x0)
-        expect(q.y1).toBeGreaterThan(q.y0)
-      }
+  it('lots stay inside their block, off the roads, and never overlap each other', () => {
+    for (const { b, l } of allLots) {
+      expect(l.x0).toBeGreaterThanOrEqual(b.x0 + 3 - 1e-6)
+      expect(l.y0).toBeGreaterThanOrEqual(b.y0 + 3 - 1e-6)
+      expect(l.x1).toBeLessThanOrEqual(b.x1 - 3 + 1e-6)
+      expect(l.y1).toBeLessThanOrEqual(b.y1 - 3 + 1e-6)
     }
-    // no flat building anywhere outside a lot block
-    for (const q of city.buildings.filter((x) => x.flat)) expect(lots.some((b) => q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)).toBe(true)
+    for (const b of lotBlocks) {
+      const ls = b.lots!
+      for (let i = 0; i < ls.length; i++)
+        for (let j = i + 1; j < ls.length; j++) {
+          const p = ls[i],
+            q = ls[j]
+          expect(p.x1 <= q.x0 + 1e-6 || q.x1 <= p.x0 + 1e-6 || p.y1 <= q.y0 + 1e-6 || q.y1 <= p.y0 + 1e-6).toBe(true)
+        }
+    }
+  })
+
+  it('villa blocks hold several villas (a street of them), all the same way round', () => {
+    const villaBlocks = lotBlocks.filter((b) => b.lots![0].art === 'villa')
+    expect(villaBlocks.some((b) => b.lots!.length >= 2)).toBe(true)
+    for (const b of villaBlocks) expect(new Set(b.lots!.map((l) => l.rot)).size).toBe(1)
+  })
+
+  it('leftover strips of a lot block get ordinary buildings that do not overlap the lots', () => {
+    for (const b of lotBlocks) {
+      const mine = city.buildings.filter((q) => q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)
+      const flat = mine.filter((q) => q.flat)
+      expect(flat.length).toBe(b.lots!.reduce((n, l) => n + LOTS[l.art].parts.length, 0))
+      for (const q of mine.filter((x) => !x.flat))
+        for (const l of b.lots!) expect(q.x1 <= l.x0 + 1e-6 || q.x0 >= l.x1 - 1e-6 || q.y1 <= l.y0 + 1e-6 || q.y0 >= l.y1 - 1e-6, 'building overlaps a lot').toBe(true)
+    }
+    for (const q of city.buildings.filter((x) => x.flat)) expect(lotBlocks.some((b) => q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)).toBe(true)
+  })
+
+  it('fitScale / tileGrid only return sizes that really fit', () => {
+    const v = LOTS.villa
+    expect(fitScale(v, 40, 40)).toBeNull() // smaller than a villa: not squeezed into a toy
+    const f = fitScale(LOTS.campus, 100, 100)
+    if (f) {
+      const [w, h] = lotDims(LOTS.campus, f.s, f.rot)
+      expect(w).toBeLessThanOrEqual(100 + 1e-6)
+      expect(h).toBeLessThanOrEqual(100 + 1e-6)
+    }
+    const g = tileGrid(v, 120, 100, 2)!
+    expect(g.cols * g.tw + (g.cols - 1) * 2).toBeLessThanOrEqual(120 + 1e-6)
+    expect(g.rows * g.th + (g.rows - 1) * 2).toBeLessThanOrEqual(100 + 1e-6)
+    expect(tileGrid(v, 30, 30, 2)).toBeNull()
   })
 
   it('lotRect honours turning and mirroring (the corners land on the right corners)', () => {
@@ -675,7 +744,7 @@ describe('photo art and landmark lots', () => {
     expect(lotRect({ ...base, rot: 1 }, 0, 0, 0.5, 0.5)).toEqual([100, 0, 200, 50])
   })
 
-  it('the road graph is still fully connected with lots in place', () => {
+  it('the road graph is still fully connected', () => {
     const n = city.nodeCount
     const seen = new Uint8Array(n)
     const stack = [0]

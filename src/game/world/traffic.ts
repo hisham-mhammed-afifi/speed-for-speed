@@ -77,13 +77,15 @@ export class LaneDriver {
       toEnd = len - t
     }
     const w = city.edgeWidth(this.a, this.b)
-    const off = w * (this.pullOver ? 0.4 : 0.25) + this.nudge
+    const lane = city.laneOffset(this.a, this.b)
+    // pulling over means into the parking strip / shoulder, not the middle of the road
+    const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge
     const la = clamp(6 + car.speed * 0.55, 7, 20)
     const tt = Math.min(Math.max(t, 0) + la, len)
     const tx = pa.x + ux * tt - uy * off,
       ty = pa.y + uy * tt + ux * off
     steerTo(car, tx, ty)
-    let target = this.speedCap * (w >= 36 ? 2 : w >= 24 ? 1.3 : w <= 8 ? 0.6 : 1) // the highway ring is fast
+    let target = this.speedCap * (w >= 28 ? 2 : w >= 18 ? 1.3 : w <= 6 ? 0.6 : 1) // the highway ring is fast
     if (this.turnSlow && toEnd < 40) target = Math.min(target, 6.5)
     if (this.pullOver) target = Math.min(target, 3)
     // cross traffic: ease off for a fast car that is about to cross our path at the next intersection

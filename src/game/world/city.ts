@@ -1,5 +1,5 @@
 import { rng } from '../core/math'
-import { fitLot, LOTS, lotRect } from './worldArt'
+import { fitScale, LOTS, lotDims, lotRect, tileGrid } from './worldArt'
 import type { Block, BlockDistrict, Building, BuildingKind, District, Jump, LotPlacement, PropSpot, Rect, Surface, Tree, Tunnel, Wall } from '../types'
 
 export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', Surface> = {
@@ -11,7 +11,11 @@ export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', S
 }
 
 export type RoadType = 'highway' | 'avenue' | 'street' | 'alley'
-const TYPES: Record<RoadType, number> = { highway: 36, avenue: 24, street: 15, alley: 8 }
+// Road widths in metres. Lanes are about 3.6 m (a car is 4.5-5 m long and 1.9 m wide), with a parking strip on streets
+// and a hard shoulder on the highway; highways have a 3 m median. Cars drive in the lane whose centre is LANE_OFFSET
+// from the road's centre line (the outer lane on an avenue, the middle lane on the highway).
+const TYPES: Record<RoadType, number> = { highway: 28, avenue: 18, street: 11, alley: 6 }
+export const LANE_OFFSET: Record<RoadType, number> = { highway: 6.9, avenue: 5.4, street: 1.8, alley: 1.5 }
 const SIDEWALK = 3
 const CELL = 80
 /** The ring highway can only be entered / left at these grid lines. */
@@ -67,6 +71,8 @@ export interface City {
   isRamp(i: number, j: number): boolean
   nearestNode(x: number, y: number): number
   edgeWidth(a: number, b: number): number
+  /** how far from the road's centre line the driving lane's centre is on this edge */
+  laneOffset(a: number, b: number): number
   nodeHalfWidth(id: number): number
   randomNode(): number
   colRoad(x: number): number
@@ -191,30 +197,70 @@ export function createCity(seed = 20261123): City {
     }
   }
 
-  // ---------- landmark lots: a few blocks get a photo set piece instead of generated buildings ----------
+  // ---------- landmark lots: photo set pieces at their real-world size ----------
   // (a separate generator, so the rest of the city doesn't depend on how many lots there are)
+  // A lot is anchored in one corner of its block; the strips left over get ordinary generated buildings (block.rest).
   {
     const RL = rng(seed ^ 0x5bd1e995)
-    for (const art of Object.values(LOTS)) {
-      const cands: { b: Block; rot: 0 | 1; score: number }[] = []
+    const LOT_GAP = 3
+    const inner = (b: Block): Rect => ({ x0: b.x0 + SIDEWALK, y0: b.y0 + SIDEWALK, x1: b.x1 - SIDEWALK, y1: b.y1 - SIDEWALK })
+    /** put a w x h box in one corner of `r` and return it plus the leftover strips beside and behind it */
+    const anchored = (r: Rect, w: number, h: number, right: boolean, bottom: boolean): { box: Rect; rest: Rect[] } => {
+      const bx0 = right ? r.x1 - w : r.x0,
+        by0 = bottom ? r.y1 - h : r.y0
+      const box: Rect = { x0: bx0, y0: by0, x1: bx0 + w, y1: by0 + h }
+      const rest: Rect[] = []
+      const sx0 = right ? r.x0 : box.x1 + LOT_GAP,
+        sx1 = right ? box.x0 - LOT_GAP : r.x1
+      if (sx1 > sx0) rest.push({ x0: sx0, y0: r.y0, x1: sx1, y1: r.y1 })
+      const sy0 = bottom ? r.y0 : box.y1 + LOT_GAP,
+        sy1 = bottom ? box.y0 - LOT_GAP : r.y1
+      if (sy1 > sy0) rest.push({ x0: box.x0, y0: sy0, x1: box.x1, y1: sy1 })
+      return { box, rest }
+    }
+    // single landmarks: the campus in the port, residences downtown
+    for (const art of [LOTS.campus, LOTS.residence]) {
+      const cands: { b: Block; rot: 0 | 1; s: number; score: number }[] = []
       for (const b of blocks) {
-        if (b.type !== 'build' || b.lot || b.district !== art.district) continue
-        const fit = fitLot(art, b.x0 + SIDEWALK, b.y0 + SIDEWALK, b.x1 - SIDEWALK, b.y1 - SIDEWALK)
-        if (fit) cands.push({ b, rot: fit.rot, score: fit.distortion + RL() * 0.12 })
+        if (b.type !== 'build' || b.lots || b.district !== art.district) continue
+        const r = inner(b)
+        const f = fitScale(art, r.x1 - r.x0, r.y1 - r.y0)
+        if (f) cands.push({ b, rot: f.rot, s: f.s, score: Math.abs(f.s - 1) + RL() * 0.1 })
       }
       cands.sort((p, q) => p.score - q.score)
       for (const c of cands.slice(0, art.count)) {
-        const lot: LotPlacement = {
-          art: art.id,
-          x0: c.b.x0 + SIDEWALK,
-          y0: c.b.y0 + SIDEWALK,
-          x1: c.b.x1 - SIDEWALK,
-          y1: c.b.y1 - SIDEWALK,
-          rot: c.rot,
-          flipX: RL() < 0.5,
-          flipY: RL() < 0.5,
-        }
-        c.b.lot = lot
+        const [w, h] = lotDims(art, c.s, c.rot)
+        const { box, rest } = anchored(inner(c.b), w, h, RL() < 0.5, RL() < 0.5)
+        c.b.lots = [{ art: art.id, ...box, rot: c.rot, flipX: RL() < 0.5, flipY: RL() < 0.5 }]
+        c.b.rest = rest
+      }
+    }
+    // villas: a street of them, as many as fit in a suburbs block
+    {
+      const art = LOTS.villa
+      const VILLA_GAP = 2
+      const cands: { b: Block; g: NonNullable<ReturnType<typeof tileGrid>>; score: number }[] = []
+      for (const b of blocks) {
+        if (b.type !== 'build' || b.lots || b.district !== art.district) continue
+        const r = inner(b)
+        const g = tileGrid(art, r.x1 - r.x0, r.y1 - r.y0, VILLA_GAP)
+        if (g) cands.push({ b, g, score: g.cols * g.rows + RL() * 1.5 })
+      }
+      cands.sort((p, q) => q.score - p.score)
+      for (const c of cands.slice(0, art.count)) {
+        const { cols, rows, tw, th, rot } = c.g
+        const gw = cols * tw + (cols - 1) * VILLA_GAP,
+          gh = rows * th + (rows - 1) * VILLA_GAP
+        const { box, rest } = anchored(inner(c.b), gw, gh, RL() < 0.5, RL() < 0.5)
+        const lots: LotPlacement[] = []
+        for (let rr = 0; rr < rows; rr++)
+          for (let cc = 0; cc < cols; cc++) {
+            const x0 = box.x0 + cc * (tw + VILLA_GAP),
+              y0 = box.y0 + rr * (th + VILLA_GAP)
+            lots.push({ art: art.id, x0, y0, x1: x0 + tw, y1: y0 + th, rot, flipX: RL() < 0.5, flipY: RL() < 0.5 })
+          }
+        c.b.lots = lots
+        c.b.rest = rest
       }
     }
   }
@@ -261,7 +307,7 @@ export function createCity(seed = 20261123): City {
   function towerSplit(x0: number, y0: number, x1: number, y1: number, depth: number): void {
     const w = x1 - x0,
       h = y1 - y0
-    if (depth < 3 && Math.max(w, h) > 55 && R() < 0.9) {
+    if (depth < 3 && Math.max(w, h) > 55 && (R() < 0.9 || Math.max(w, h) > 80)) {
       const gap = R() < 0.5 ? 8 : 0
       if (w >= h) {
         const cut = x0 + w * (0.35 + R() * 0.3)
@@ -338,16 +384,26 @@ export function createCity(seed = 20261123): City {
       y0 = b.y0 + SIDEWALK,
       x1 = b.x1 - SIDEWALK,
       y1 = b.y1 - SIDEWALK
-    if (b.type === 'build' && b.lot) {
-      // colliders for the photo's roofs; the picture itself is drawn by the renderer
-      const art = LOTS[b.lot.art]
-      const kind: BuildingKind = art.id === 'villa' ? 'house' : art.id === 'campus' ? 'warehouse' : 'tower'
-      for (const [u0, v0, u1, v1, height] of art.parts) {
-        const [rx0, ry0, rx1, ry1] = lotRect(b.lot, u0, v0, u1, v1)
-        push(kind, b.district, rx0, ry0, rx1, ry1, height, [90, 90, 96], false)
-        const nb = buildings[buildings.length - 1]
-        nb.flat = true
-        nb.hasHeli = false
+    if (b.type === 'build' && b.lots) {
+      // colliders for the photos' roofs (the pictures themselves are drawn by the renderer)...
+      for (const lot of b.lots) {
+        const art = LOTS[lot.art]
+        const kind: BuildingKind = art.id === 'villa' ? 'house' : art.id === 'campus' ? 'warehouse' : 'tower'
+        for (const [u0, v0, u1, v1, height] of art.parts) {
+          const [rx0, ry0, rx1, ry1] = lotRect(lot, u0, v0, u1, v1)
+          push(kind, b.district, rx0, ry0, rx1, ry1, height, [90, 90, 96], false)
+          const nb = buildings[buildings.length - 1]
+          nb.flat = true
+          nb.hasHeli = false
+        }
+      }
+      // ...and ordinary buildings on whatever is left of the block
+      for (const r of b.rest ?? []) {
+        const min = b.district === 'suburbs' ? 20 : 14
+        if (r.x1 - r.x0 < min || r.y1 - r.y0 < min) continue
+        if (b.district === 'downtown') towerSplit(r.x0, r.y0, r.x1, r.y1, 0)
+        else if (b.district === 'port') genPort(r.x0, r.y0, r.x1, r.y1)
+        else genSuburbs(r.x0, r.y0, r.x1, r.y1)
       }
     } else if (b.type === 'build') {
       if (x1 - x0 < 12 || y1 - y0 < 12) {
@@ -494,7 +550,7 @@ export function createCity(seed = 20261123): City {
     const bx = e.horiz ? vx[e.i + 1] : ax,
       by = e.horiz ? ay : hy[e.j + 1]
     const len = Math.hypot(bx - ax, by - ay)
-    return { ax, ay, ux: (bx - ax) / len, uy: (by - ay) / len, len, w: e.horiz ? hw[e.j] : vw[e.i] }
+    return { ax, ay, ux: (bx - ax) / len, uy: (by - ay) / len, len, w: e.horiz ? hw[e.j] : vw[e.i], lane: LANE_OFFSET[e.horiz ? H.type[e.j] : V.type[e.i]] }
   }
 
   const tunnels: Tunnel[] = []
@@ -513,7 +569,7 @@ export function createCity(seed = 20261123): City {
     const e = takeEdge()
     if (!e) break
     const g = edgeGeo(e)
-    const off = g.w * 0.25
+    const off = g.lane
     const cx = g.ax + g.ux * g.len * 0.42 - g.uy * off,
       cy = g.ay + g.uy * g.len * 0.42 + g.ux * off
     const lat = Math.max(2.2, g.w * 0.1)
@@ -527,7 +583,7 @@ export function createCity(seed = 20261123): City {
     const e = takeEdge()
     if (!e) break
     const g = edgeGeo(e)
-    const off = g.w * 0.25
+    const off = g.lane
     const zone = Math.min(42, g.len * 0.45)
     const d0 = g.len * 0.28,
       d1 = d0 + zone
@@ -616,6 +672,7 @@ export function createCity(seed = 20261123): City {
     },
     nearestNode: (x, y) => nearestIdx(hy, y) * NV + nearestIdx(vx, x),
     edgeWidth: (a, b) => (((a / NV) | 0) === ((b / NV) | 0) ? hw[(a / NV) | 0] : vw[a % NV]),
+    laneOffset: (a, b) => LANE_OFFSET[((a / NV) | 0) === ((b / NV) | 0) ? H.type[(a / NV) | 0] : V.type[a % NV]],
     nodeHalfWidth: (id) => Math.max(vw[id % NV], hw[(id / NV) | 0]) / 2,
     randomNode: () => (Math.random() * NV * NH) | 0,
 
@@ -730,7 +787,7 @@ export function createCity(seed = 20261123): City {
       const len = Math.hypot(bx - ax, by - ay) || 1
       const ux = (bx - ax) / len,
         uy = (by - ay) / len
-      const off = city.edgeWidth(a, b) * 0.25
+      const off = city.laneOffset(a, b)
       return { x: ax + ux * t * len - uy * off, y: ay + uy * t * len + ux * off, ux, uy, len }
     },
   }

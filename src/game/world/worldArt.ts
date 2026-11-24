@@ -24,6 +24,10 @@ export interface LotArt {
   file: string
   /** width / height of the processed image */
   aspect: number
+  /** real-world width in metres, measured from the cars in the photo (they are about 4.5 m long) */
+  metresWide: number
+  /** smallest scale it may be squeezed to when fitting a block */
+  minScale: number
   district: BlockDistrict
   /** how many of these a city gets */
   count: number
@@ -36,8 +40,10 @@ export const LOTS: Record<LotId, LotArt> = {
     id: 'villa',
     file: 'world/lots/villa.webp',
     aspect: 1024 / 590,
+    metresWide: 55,
+    minScale: 1,
     district: 'suburbs',
-    count: 3,
+    count: 4,
     parts: [
       [0.145, 0.3, 0.32, 0.49, 7], // west wing roof
       [0.3, 0.255, 0.62, 0.56, 7.5], // main roof
@@ -51,6 +57,8 @@ export const LOTS: Record<LotId, LotArt> = {
     id: 'campus',
     file: 'world/lots/campus.webp',
     aspect: 1024 / 629,
+    metresWide: 120,
+    minScale: 0.7,
     district: 'port',
     count: 1,
     parts: [
@@ -65,6 +73,8 @@ export const LOTS: Record<LotId, LotArt> = {
     id: 'residence',
     file: 'world/lots/residence.webp',
     aspect: 1024 / 729,
+    metresWide: 74,
+    minScale: 0.85,
     district: 'downtown',
     count: 2,
     parts: [
@@ -80,22 +90,39 @@ export const LOTS: Record<LotId, LotArt> = {
 
 export const WORLD_FILES: string[] = [...TREE_FILES, GRASS_FILES.lawn, GRASS_FILES.meadow, ...Object.values(LOTS).map((l) => l.file)]
 
-/** How far a lot may be stretched to fill a block before the block is not a candidate (ratio of block aspect to art aspect). */
-const MIN_FIT = 0.74,
-  MAX_FIT = 1.35
+/** Largest a lot may be scaled up from its measured real-world size. */
+export const LOT_MAX_SCALE = 1.05
 
-/** Can this art cover a block with these inner bounds? Returns the quarter-turn and how distorted it would look (1 = none). */
-export function fitLot(art: LotArt, x0: number, y0: number, x1: number, y1: number): { rot: 0 | 1; distortion: number } | null {
-  const w = x1 - x0,
-    h = y1 - y0
-  if (w < 55 || h < 45) return null
-  let best: { rot: 0 | 1; distortion: number } | null = null
+/** World size in metres of a lot drawn at scale s, turned a quarter or not. */
+export function lotDims(art: LotArt, s: number, rot: 0 | 1): [number, number] {
+  const w = art.metresWide * s,
+    h = w / art.aspect
+  return rot ? [h, w] : [w, h]
+}
+
+/**
+ * Can one of these fit inside a w x h area at (nearly) its true size? Returns the quarter-turn and the scale to use:
+ * the biggest that fits, never above LOT_MAX_SCALE, and not below the art's own minimum (so a lot is never shrunk into a toy).
+ */
+export function fitScale(art: LotArt, w: number, h: number): { rot: 0 | 1; s: number } | null {
+  let best: { rot: 0 | 1; s: number } | null = null
   for (const rot of [0, 1] as const) {
-    const a = rot ? 1 / art.aspect : art.aspect
-    const r = w / h / a
-    if (r < MIN_FIT || r > MAX_FIT) continue
-    const d = Math.max(r, 1 / r)
-    if (!best || d < best.distortion) best = { rot, distortion: d }
+    const [bw, bh] = lotDims(art, 1, rot)
+    const s = Math.min(w / bw, h / bh, LOT_MAX_SCALE)
+    if (s >= art.minScale && (!best || s > best.s)) best = { rot, s }
+  }
+  return best
+}
+
+/** The most tiles of this art (at true size, with a gap between them) that fit in a w x h area, in either orientation. */
+export function tileGrid(art: LotArt, w: number, h: number, gap: number): { rot: 0 | 1; cols: number; rows: number; tw: number; th: number } | null {
+  let best: { rot: 0 | 1; cols: number; rows: number; tw: number; th: number } | null = null
+  for (const rot of [0, 1] as const) {
+    const [tw, th] = lotDims(art, 1, rot)
+    const cols = Math.floor((w + gap) / (tw + gap)),
+      rows = Math.floor((h + gap) / (th + gap))
+    if (cols < 1 || rows < 1) continue
+    if (!best || cols * rows > best.cols * best.rows) best = { rot, cols, rows, tw, th }
   }
   return best
 }

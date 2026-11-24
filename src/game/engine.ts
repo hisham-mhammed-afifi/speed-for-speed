@@ -18,7 +18,7 @@ import { loadSave, writeSave } from './save'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
-import { createCity } from './world/city'
+import { createCity, LANE_OFFSET } from './world/city'
 import { Traffic } from './world/traffic'
 import { Difficulty } from './ai/difficulty'
 import { Memory } from './ai/memory'
@@ -334,7 +334,7 @@ class GameEngine {
           bj = j
         }
       }
-      c.place(c.x, city.hy[bj] + (Math.cos(c.theta) > 0 ? 1 : -1) * city.hw[bj] * 0.25, Math.cos(c.theta) > 0 ? 0 : Math.PI)
+      c.place(c.x, city.hy[bj] + (Math.cos(c.theta) > 0 ? 1 : -1) * LANE_OFFSET[city.ht[bj]], Math.cos(c.theta) > 0 ? 0 : Math.PI)
     } else {
       let bi = 0,
         bd = 1e9
@@ -346,7 +346,7 @@ class GameEngine {
         }
       }
       const down = Math.sin(c.theta) > 0
-      c.place(city.vx[bi] - (down ? 1 : -1) * city.vw[bi] * 0.25, c.y, down ? Math.PI / 2 : -Math.PI / 2)
+      c.place(city.vx[bi] - (down ? 1 : -1) * LANE_OFFSET[city.vt[bi]], c.y, down ? Math.PI / 2 : -Math.PI / 2)
     }
     camera.snap()
   }

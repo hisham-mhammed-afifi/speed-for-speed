@@ -215,7 +215,7 @@ const save = async (img, rel, opts) => {
 }
 
 for (const [id, name] of TREES) await save(await cutout(file(id), { square: true, keepLargest: true, size: 192, holes: true }), `trees/${name}.webp`, { quality: 82, alphaQuality: 92 })
-for (const [id, name] of GRASS) await save(await seamlessTile(file(id), { left: 320, top: 0, width: 768, height: 768 }, 512), `grass/${name}.webp`, { quality: 80 })
+for (const [id, name] of GRASS) await save(await seamlessTile(file(id), { left: 320, top: 0, width: 768, height: 768 }, 256), `grass/${name}.webp`, { quality: 80 })
 for (const [id, name] of LOTS) await save(await cutout(file(id), { square: false, keepLargest: true, size: 1024 }), `lots/${name}.webp`, { quality: 82, alphaQuality: 90 })
 
 console.table(report)

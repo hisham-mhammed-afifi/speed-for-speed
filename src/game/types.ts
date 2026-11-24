@@ -138,8 +138,10 @@ export interface Block {
   y1: number
   type: 'build' | 'park' | 'plaza' | 'water'
   district: BlockDistrict
-  /** set when a photo landmark lot covers this block (see world/worldArt.ts) */
-  lot?: LotPlacement
+  /** photo landmark lots on this block, at real-world size (see world/worldArt.ts) */
+  lots?: LotPlacement[]
+  /** the strips of a lot block that are left for ordinary generated buildings */
+  rest?: Rect[]
 }
 
 export type LotId = 'villa' | 'campus' | 'residence'
