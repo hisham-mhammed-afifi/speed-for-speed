@@ -43,6 +43,11 @@ p { margin: 0; line-height: 1.5; max-width: 62ch; }
 .stat b { font-weight: 600; text-align: right; font-size: 12px; }
 .bar { height: 8px; background: rgba(255, 255, 255, 0.12); border-radius: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: linear-gradient(90deg, #38b6ff, #7be0ff); }
+.wanted { display: flex; flex-direction: column; gap: 6px; }
+.wanted-head { display: flex; justify-content: space-between; font-size: 13px; color: #aab3c0; }
+.wanted-head b { color: #fff; }
+.wanted-bar i { background: linear-gradient(90deg, #ffd23f, #ff7a1a, #ff3b3b); }
+.wanted-note { font-size: 12px; color: #aab3c0; }
 .res-title { font-size: 44px; font-style: italic; }
 .res-title.escaped { color: #7be08a; }
 .res-title.busted, .res-title.wrecked { color: #ff4a4a; }
@@ -120,4 +125,14 @@ p { margin: 0; line-height: 1.5; max-width: 62ch; }
   .t-nitro { width: 62px; height: 62px; right: calc(env(safe-area-inset-right, 0px) + 36px); bottom: calc(env(safe-area-inset-bottom, 0px) + 116px); }
   .t-pad { top: 0; }
   .t-hint { display: none; }
+  /* menus: tighter so the result / pause / select buttons stay on screen */
+  .panel { padding: 12px 22px; gap: 8px; }
+  .res-title { font-size: 30px; }
+  .res-stats > div { padding: 3px 0; font-size: 14px; }
+  .preview { height: 84px; }
+  .preview img { max-height: 76px; }
+  .carinfo { gap: 2px; }
+  .carinfo h3 { font-size: 18px; }
+  .stat { font-size: 12px; }
+  .carinfo > .sub:last-child, .stat:last-child { display: none; }
 }

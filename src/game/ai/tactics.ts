@@ -1,3 +1,4 @@
+import { Difficulty } from './difficulty'
 import { findPath } from './pathfind'
 import { game } from '../state'
 import type { City } from '../world/city'
@@ -125,7 +126,7 @@ export const Tactics = {
   dispatch(level: number, units: PoliceUnit[]): number {
     const city = game.city,
       pl = game.player.car
-    const want = WANT[Math.min(level, 5)]
+    const want = Math.max(0, WANT[Math.min(level, 5)] + Difficulty.k.tactBonus)
     let active = 0
     for (const u of game.cops) if (u.state === 'intercept') active++
     if (active >= want) return 0

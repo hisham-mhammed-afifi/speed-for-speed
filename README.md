@@ -75,6 +75,11 @@ Police memory (`ai/memory.ts`): the game counts how long you hide in each 80 m c
 saves it with your progress. While you are out of sight the cops check your remembered hideouts first, and roadblocks and spike strips
 go on the street leading into one ahead of you. Faint rings on the minimap show what they remember; the pause menu has "Reset police memory".
 
+Adaptive difficulty (`ai/difficulty.ts`): a 0..1 wanted rating (default 0.4 = baseline) follows your results: quick escapes raise it, early
+busts lower it. It scales the cop count, their speed boost and reaction time, how close new units spawn, roadblock/spike frequency, how long
+you must stay hidden, and how many units try to cut you off. It shows on the car-select and result screens; the pause menu can freeze it
+("Difficulty: Fixed"). `?skill=0..1` overrides it for testing (and is never saved). In a bot test, escape rate fell from 83% (0.1) to 28% (0.4) to 11% (0.9).
+
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.
 

@@ -63,6 +63,9 @@ export interface RunStats {
   copsDown: number
   bounty: number
   best: number
+  /** wanted rating before and after this run */
+  skillBefore?: number
+  skillAfter?: number
 }
 
 export interface SaveData {
@@ -72,6 +75,9 @@ export interface SaveData {
   car: number
   /** where the police remember you hiding: grid cell key -> seconds hidden (see ai/memory.ts) */
   memory?: Record<string, number>
+  /** adaptive-difficulty wanted rating 0..1 and whether it is frozen (see ai/difficulty.ts) */
+  skill?: number
+  fixedSkill?: boolean
 }
 
 export interface Safe {

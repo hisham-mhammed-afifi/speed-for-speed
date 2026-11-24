@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { carBars, PLAYER_CARS } from '../../game/data/cars'
 import { engine } from '../../game/engine'
 import { useGameStore } from '../../store'
+import { WantedBar } from '../WantedBar'
 
 function StatBar({ label, frac, text }: { label: string; frac: number; text: string }) {
   const pct = Math.round(Math.max(0.06, Math.min(1, frac)) * 100)
@@ -20,6 +21,7 @@ export function CarSelect() {
   const index = useGameStore((s) => s.selectedCar)
   const setSelectedCar = useGameStore((s) => s.setSelectedCar)
   const setScreen = useGameStore((s) => s.setScreen)
+  const skill = useGameStore((s) => s.save.skill)
   const n = PLAYER_CARS.length
   const spec = PLAYER_CARS[index]
   const bars = carBars(spec)
@@ -75,6 +77,7 @@ export function CarSelect() {
             {index + 1} / {n}
           </div>
         </div>
+        <WantedBar rating={skill ?? 0.4} />
         <div className="menu row">
           <button onClick={() => setScreen('title')}>Back</button>
           <button className="primary" onClick={drive}>

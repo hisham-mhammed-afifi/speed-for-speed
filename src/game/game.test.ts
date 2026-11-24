@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { findPath } from './ai/pathfind'
+import { DEFAULT_RATING, Difficulty, scoreRun } from './ai/difficulty'
 import { CELL, HOT, Memory } from './ai/memory'
 import { predictRoute } from './ai/tactics'
 import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
@@ -527,5 +528,88 @@ describe('police memory (plan 2)', () => {
     for (let i = 0; i < 300; i++) Memory.recordHidden(i * CELL, 0, 1 + (i % 7))
     Memory.endRun(true)
     expect(Memory.cells.size).toBeLessThanOrEqual(80)
+  })
+})
+
+describe('adaptive difficulty (plan 3)', () => {
+  beforeEach(() => {
+    Difficulty.reset()
+  })
+
+  it('the default rating is the baseline tuning', () => {
+    expect(Difficulty.rating).toBe(DEFAULT_RATING)
+    const k = Difficulty.k
+    expect(k.copOffset).toBe(0)
+    expect(k.boostMul).toBe(1)
+    expect(k.reactMul).toBe(1)
+    expect(k.spawnMin).toBe(110)
+    expect(k.spawnMax).toBe(260)
+    expect(k.trapMul).toBe(1)
+    expect(k.evadeAdd).toBe(0)
+    expect(k.tactBonus).toBe(0)
+  })
+
+  it('escaping raises the rating, getting busted early lowers it', () => {
+    const up = Difficulty.update('escaped', 40, 2, 90)
+    expect(up.after).toBeGreaterThan(up.before)
+    Difficulty.reset()
+    const down = Difficulty.update('busted', 15, 0, 100)
+    expect(down.after).toBeLessThan(down.before)
+  })
+
+  it('scores: fast clean escapes beat slow ones, long busts beat short ones', () => {
+    expect(scoreRun('escaped', 30, 3, 100)).toBeGreaterThan(scoreRun('escaped', 120, 0, 40))
+    expect(scoreRun('busted', 100, 0, 0)).toBeGreaterThan(scoreRun('busted', 10, 0, 0))
+    expect(scoreRun('escaped', 200, 0, 0)).toBeGreaterThan(scoreRun('busted', 200, 0, 0))
+  })
+
+  it('moves a bounded amount per run and stays within 0.05..0.95', () => {
+    const r = Difficulty.update('escaped', 30, 5, 100)
+    expect(Math.abs(r.after - r.before)).toBeLessThanOrEqual(0.1 + 1e-9)
+    for (let i = 0; i < 80; i++) Difficulty.update('escaped', 30, 5, 100)
+    expect(Difficulty.rating).toBeLessThanOrEqual(0.95)
+    expect(Difficulty.rating).toBeGreaterThan(0.8)
+    for (let i = 0; i < 200; i++) Difficulty.update('busted', 9, 0, 0)
+    expect(Difficulty.rating).toBeGreaterThanOrEqual(0.05)
+    expect(Difficulty.rating).toBeLessThan(0.15)
+  })
+
+  it('ignores instant restarts, fixed difficulty and the dev override', () => {
+    expect(Difficulty.update('busted', 3, 0, 100).after).toBe(DEFAULT_RATING)
+    Difficulty.setFixed(true)
+    expect(Difficulty.update('escaped', 40, 3, 100).after).toBe(DEFAULT_RATING)
+    Difficulty.setFixed(false)
+    Difficulty.load({ best: 0, total: 0, longest: 0, car: 0 }, '0.9')
+    expect(Difficulty.eff()).toBe(0.9)
+    expect(Difficulty.update('escaped', 40, 3, 100).after).toBe(DEFAULT_RATING) // override: nothing is saved
+  })
+
+  it('the knobs grow monotonically with the rating', () => {
+    const at = (r: number) => {
+      Difficulty.load({ best: 0, total: 0, longest: 0, car: 0, skill: r }, null)
+      return { ...Difficulty.k }
+    }
+    const ks = [0.05, 0.2, 0.4, 0.6, 0.8, 0.95].map(at)
+    for (let i = 1; i < ks.length; i++) {
+      expect(ks[i].copOffset).toBeGreaterThanOrEqual(ks[i - 1].copOffset)
+      expect(ks[i].boostMul).toBeGreaterThan(ks[i - 1].boostMul)
+      expect(ks[i].reactMul).toBeLessThan(ks[i - 1].reactMul)
+      expect(ks[i].spawnMin).toBeLessThan(ks[i - 1].spawnMin)
+      expect(ks[i].trapMul).toBeLessThan(ks[i - 1].trapMul)
+      expect(ks[i].evadeAdd).toBeGreaterThanOrEqual(ks[i - 1].evadeAdd)
+      expect(ks[i].tactBonus).toBeGreaterThanOrEqual(ks[i - 1].tactBonus)
+    }
+    expect(ks[0].copOffset).toBeLessThan(0) // easier than baseline
+    expect(ks[5].copOffset).toBeGreaterThan(0) // harder than baseline
+    expect(ks[5].boostMul).toBeLessThan(1.2) // but bounded
+  })
+
+  it('loads a saved rating and survives junk', () => {
+    Difficulty.load({ best: 0, total: 0, longest: 0, car: 0, skill: 0.7, fixedSkill: true }, null)
+    expect(Difficulty.rating).toBe(0.7)
+    expect(Difficulty.fixed).toBe(true)
+    Difficulty.load({ best: 0, total: 0, longest: 0, car: 0, skill: Number.NaN }, 'abc')
+    expect(Difficulty.rating).toBe(DEFAULT_RATING)
+    expect(Difficulty.override).toBeNull()
   })
 })

@@ -19,6 +19,7 @@ import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
 import { createCity } from './world/city'
 import { Traffic } from './world/traffic'
+import { Difficulty } from './ai/difficulty'
 import { Memory } from './ai/memory'
 import { DISTRICT_NAMES } from './types'
 import type { CarKind, CarSpec, District, RunResult, RunStats, SaveData } from './types'
@@ -86,6 +87,7 @@ class GameEngine {
       this.saveData = loadSave()
       this.carIndex = Math.min(this.saveData.car, PLAYER_CARS.length - 1)
       Memory.load(this.saveData.memory)
+      Difficulty.load(this.saveData, this.params.get('skill'))
       store().setSave(this.saveData)
       store().setSelectedCar(this.carIndex)
       game.state = 'title'
@@ -225,6 +227,11 @@ class GameEngine {
     // the police learn from every run: where you hid, and how well it worked
     Memory.endRun(kind === 'escaped')
     this.saveData.memory = Memory.save()
+    const sk = Difficulty.update(kind, heat.time, heat.copsDown, game.player.car.health)
+    stats.skillBefore = sk.before
+    stats.skillAfter = sk.after
+    this.saveData.skill = Difficulty.rating
+    this.saveData.fixedSkill = Difficulty.fixed
     writeSave(this.saveData)
     store().setSave({ ...this.saveData })
     game.state = 'result'
@@ -232,6 +239,19 @@ class GameEngine {
     this.pushHud(true)
     store().setResult({ kind, stats })
     store().setScreen('result')
+  }
+
+  /** Freeze or unfreeze the adaptive difficulty. Returns the new state. */
+  toggleFixedSkill(): boolean {
+    Difficulty.setFixed(!Difficulty.fixed)
+    this.saveData.fixedSkill = Difficulty.fixed
+    writeSave(this.saveData)
+    store().setSave({ ...this.saveData })
+    return Difficulty.fixed
+  }
+
+  get fixedSkill(): boolean {
+    return Difficulty.fixed
   }
 
   /** Forget everything the police have learned about your hiding places. */

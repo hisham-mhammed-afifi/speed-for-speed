@@ -1,5 +1,6 @@
 import { engine } from './game/engine'
 import { heat } from './game/ai/heat'
+import { Difficulty } from './game/ai/difficulty'
 import { Memory } from './game/ai/memory'
 import { Tactics } from './game/ai/tactics'
 import { input } from './game/core/input'
@@ -35,6 +36,7 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     Props,
     Tactics,
     Memory,
+    Difficulty,
     store: useGameStore,
     update: (dt: number) => engine.update(dt),
     step: (seconds: number, dt = 1 / 120) => {

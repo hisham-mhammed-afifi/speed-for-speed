@@ -1,6 +1,7 @@
 import { clamp } from '../core/math'
 import { Phys } from '../physics/world'
 import { game } from '../state'
+import { Difficulty } from './difficulty'
 import { Memory } from './memory'
 import { Police } from './police'
 import { Tactics } from './tactics'
@@ -150,8 +151,9 @@ export class HeatManager {
     const pl = game.player.car
     this.lastX = pl.x
     this.lastY = pl.y
-    this.evadeNeeded = 12 + this.level * 3
+    this.evadeNeeded = Math.max(8, 12 + this.level * 3 + Difficulty.k.evadeAdd)
     game.toast('PURSUIT: ' + reason, '#ff4d4d')
+    if (Difficulty.k.s > 0.6) game.toast('MOST WANTED: EXTRA UNITS', '#ff9a3c')
     for (const u of game.cops) {
       if (u.state === 'patrol' && Math.hypot(u.car.x - pl.x, u.car.y - pl.y) < 420) {
         u.state = 'pursue'
@@ -284,7 +286,7 @@ export class HeatManager {
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
       const d = Math.hypot(nx - pl.x, ny - pl.y)
-      if (d < 110 || d > 260) continue
+      if (d < Difficulty.k.spawnMin || d > Difficulty.k.spawnMax) continue
       const hidden = !city.hasLOS(nx, ny, pl.x, pl.y)
       if (!hidden && tries < 14) continue
       pick = n
@@ -320,7 +322,7 @@ export class HeatManager {
       this.level = lvl
       game.toast('HEAT LEVEL ' + lvl, '#ff4d4d')
     }
-    this.evadeNeeded = 12 + this.level * 3
+    this.evadeNeeded = Math.max(8, 12 + this.level * 3 + Difficulty.k.evadeAdd)
     this.bounty += dt * (8 + this.level * 6)
 
     // visibility / busted
@@ -399,7 +401,7 @@ export class HeatManager {
 
     // keep the right number of pursuers
     this.spawnT -= dt
-    if (pursuers < COPS[this.level] && this.spawnT <= 0) {
+    if (pursuers < Math.max(2, COPS[this.level] + Difficulty.k.copOffset) && this.spawnT <= 0) {
       this.spawnT = this.level >= 3 ? 1.6 : 2.4
       this.spawnPursuer()
     }
@@ -425,7 +427,7 @@ export class HeatManager {
     // coordinated tactics: send a few units to park across the road ahead of the player
     Tactics.tick(dt)
     this.tacticsT -= dt
-    if (this.tactics && this.tacticsT <= 0 && this.grace <= 0 && this.level >= 2) {
+    if (this.tactics && this.tacticsT <= 0 && this.grace <= 0 && this.level >= Difficulty.k.tactLevel) {
       this.tacticsT = 1.5
       Tactics.dispatch(
         this.level,
@@ -436,14 +438,14 @@ export class HeatManager {
     if (this.level >= 3) {
       this.blockT -= dt
       if (this.blockT <= 0) {
-        this.blockT = 24
+        this.blockT = 24 * Difficulty.k.trapMul
         this.placeRoadblock()
       }
     }
     if (this.level >= 4) {
       this.spikeT -= dt
       if (this.spikeT <= 0) {
-        this.spikeT = 30
+        this.spikeT = 30 * Difficulty.k.trapMul
         this.placeSpikes()
       }
     }

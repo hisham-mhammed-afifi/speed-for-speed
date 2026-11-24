@@ -1,5 +1,6 @@
 import { engine } from '../../game/engine'
 import { useGameStore } from '../../store'
+import { WantedBar } from '../WantedBar'
 
 const TITLES = { escaped: 'ESCAPED', busted: 'BUSTED', wrecked: 'WRECKED' } as const
 
@@ -46,6 +47,7 @@ export function ResultScreen() {
             <b>{money(stats.best)}</b>
           </div>
         </div>
+        {stats.skillAfter !== undefined && <WantedBar rating={stats.skillAfter} before={stats.skillBefore} />}
         <div className="menu row">
           {escaped ? (
             <button className="primary" onClick={() => engine.continueAfterEscape()}>

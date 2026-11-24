@@ -1,5 +1,6 @@
 import { clamp } from '../core/math'
 import { avoid, speedTo, steerTo } from './drive'
+import { Difficulty } from './difficulty'
 import { Memory } from './memory'
 import { findPath } from './pathfind'
 import { Tactics } from './tactics'
@@ -219,7 +220,7 @@ export const Police = {
       city = game.city
     u.losT -= dt
     if (u.losT <= 0) {
-      u.losT = 0.15 + Math.random() * 0.05
+      u.losT = (0.15 + Math.random() * 0.05) * Difficulty.k.reactMul
       u.los = dist < 280 && city.hasLOS(car.x, car.y, pl.x, pl.y)
     }
     const plSp = pl.speed
@@ -228,7 +229,7 @@ export const Police = {
     const rx = -fy,
       ry = fx
     let tx: number, ty: number, tspeed: number
-    car.boost = dist > 150 ? 1.3 : 1
+    car.boost = (dist > 150 ? 1.3 : 1) * Difficulty.k.boostMul
     u.pit = false
     if (u.los || H.heliLit) {
       u.goal = undefined
