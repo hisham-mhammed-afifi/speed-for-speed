@@ -1,5 +1,6 @@
 import { rng } from '../core/math'
-import type { Block, BlockDistrict, Building, BuildingKind, District, Jump, PropSpot, Rect, Surface, Tree, Tunnel, Wall } from '../types'
+import { fitLot, LOTS, lotRect } from './worldArt'
+import type { Block, BlockDistrict, Building, BuildingKind, District, Jump, LotPlacement, PropSpot, Rect, Surface, Tree, Tunnel, Wall } from '../types'
 
 export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', Surface> = {
   asphalt: { kind: 'asphalt', grip: 1.0, roll: 1.0 },
@@ -190,6 +191,34 @@ export function createCity(seed = 20261123): City {
     }
   }
 
+  // ---------- landmark lots: a few blocks get a photo set piece instead of generated buildings ----------
+  // (a separate generator, so the rest of the city doesn't depend on how many lots there are)
+  {
+    const RL = rng(seed ^ 0x5bd1e995)
+    for (const art of Object.values(LOTS)) {
+      const cands: { b: Block; rot: 0 | 1; score: number }[] = []
+      for (const b of blocks) {
+        if (b.type !== 'build' || b.lot || b.district !== art.district) continue
+        const fit = fitLot(art, b.x0 + SIDEWALK, b.y0 + SIDEWALK, b.x1 - SIDEWALK, b.y1 - SIDEWALK)
+        if (fit) cands.push({ b, rot: fit.rot, score: fit.distortion + RL() * 0.12 })
+      }
+      cands.sort((p, q) => p.score - q.score)
+      for (const c of cands.slice(0, art.count)) {
+        const lot: LotPlacement = {
+          art: art.id,
+          x0: c.b.x0 + SIDEWALK,
+          y0: c.b.y0 + SIDEWALK,
+          x1: c.b.x1 - SIDEWALK,
+          y1: c.b.y1 - SIDEWALK,
+          rot: c.rot,
+          flipX: RL() < 0.5,
+          flipY: RL() < 0.5,
+        }
+        c.b.lot = lot
+      }
+    }
+  }
+
   // ---------- buildings ----------
   const buildings: Building[] = []
   const trees: Tree[] = []
@@ -309,7 +338,18 @@ export function createCity(seed = 20261123): City {
       y0 = b.y0 + SIDEWALK,
       x1 = b.x1 - SIDEWALK,
       y1 = b.y1 - SIDEWALK
-    if (b.type === 'build') {
+    if (b.type === 'build' && b.lot) {
+      // colliders for the photo's roofs; the picture itself is drawn by the renderer
+      const art = LOTS[b.lot.art]
+      const kind: BuildingKind = art.id === 'villa' ? 'house' : art.id === 'campus' ? 'warehouse' : 'tower'
+      for (const [u0, v0, u1, v1, height] of art.parts) {
+        const [rx0, ry0, rx1, ry1] = lotRect(b.lot, u0, v0, u1, v1)
+        push(kind, b.district, rx0, ry0, rx1, ry1, height, [90, 90, 96], false)
+        const nb = buildings[buildings.length - 1]
+        nb.flat = true
+        nb.hasHeli = false
+      }
+    } else if (b.type === 'build') {
       if (x1 - x0 < 12 || y1 - y0 < 12) {
         b.type = 'plaza'
         continue

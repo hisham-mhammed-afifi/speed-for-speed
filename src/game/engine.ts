@@ -7,6 +7,7 @@ import { loop, startLoop } from './core/loop'
 import { clamp } from './core/math'
 import { readSafeArea } from './core/viewport'
 import { ALL_CAR_FILES, PLAYER_CARS } from './data/cars'
+import { WORLD_FILES } from './world/worldArt'
 import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { camera } from './render/camera'
@@ -75,7 +76,8 @@ class GameEngine {
     Renderer.init(this.ctx)
     this.installGameHooks()
 
-    this.assets ??= loadImages(ALL_CAR_FILES, (p) => store().setLoadProgress(p)).then(() => {
+    this.assets ??= loadImages([...ALL_CAR_FILES, ...WORLD_FILES], (p) => store().setLoadProgress(p)).then(() => {
+      if (this.ctx) Renderer.initArt(this.ctx)
       game.city = createCity()
       Phys.init(game.city)
       initHudMap(game.city)

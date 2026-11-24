@@ -8,9 +8,10 @@ import type { camera as Camera } from './camera'
 import type { Car } from '../physics/car'
 import { BRIDGES, RIVER_I } from '../world/city'
 import { Props } from '../world/props'
+import { GRASS_FILES, LOTS, TREE_FILES, treeSpecies } from '../world/worldArt'
 import type { City } from '../world/city'
 import type { Heli, Spike } from '../ai/heat'
-import type { Building, Vec2 } from '../types'
+import type { Building, LotPlacement, Vec2 } from '../types'
 
 function makeTex(size: number, base: string, spread: number, count: number): HTMLCanvasElement {
   const c = document.createElement('canvas')
@@ -31,6 +32,22 @@ type PatternName = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'port' | 'lawn' | 
 const pat = {} as Record<PatternName, CanvasPattern>
 
 // ---------------------------------------------------------------- ground
+/** A landmark photo lot, stretched over its block (turned and mirrored as placed). */
+function drawLot(ctx: CanvasRenderingContext2D, lot: LotPlacement): void {
+  const im = images[LOTS[lot.art].file]
+  if (!im) return
+  const rw = lot.x1 - lot.x0,
+    rh = lot.y1 - lot.y0
+  ctx.save()
+  ctx.translate((lot.x0 + lot.x1) / 2, (lot.y0 + lot.y1) / 2)
+  if (lot.rot) ctx.rotate(Math.PI / 2)
+  ctx.scale(lot.flipX ? -1 : 1, lot.flipY ? -1 : 1)
+  const lw = lot.rot ? rh : rw,
+    lh = lot.rot ? rw : rh
+  ctx.drawImage(im, -lw / 2, -lh / 2, lw, lh)
+  ctx.restore()
+}
+
 function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
   const b = city.bounds
   ctx.fillStyle = pat.asphalt
@@ -44,6 +61,7 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
     // each district has its own ground: grey concrete downtown, dark port concrete, lawns in the suburbs
     ctx.fillStyle = bl.type === 'park' ? pat.grass : bl.district === 'suburbs' ? pat.lawn : bl.district === 'port' ? pat.port : bl.type === 'plaza' ? pat.plaza : pat.lot
     ctx.fillRect(bl.x0 + 3, bl.y0 + 3, bl.x1 - bl.x0 - 6, bl.y1 - bl.y0 - 6)
+    if (bl.lot) drawLot(ctx, bl.lot)
     ctx.strokeStyle = 'rgba(0,0,0,0.35)'
     ctx.lineWidth = 0.3
     ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
@@ -411,6 +429,7 @@ function drawCarLights(ctx: CanvasRenderingContext2D, car: Car, x: number, y: nu
 
 // ---------------------------------------------------------------- buildings
 function drawBuilding(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
+  if (b.flat) return // part of a photo lot: already in the picture
   const k = 0.0012 * b.height
   const sx = (b.x - cam.x) * k,
     sy = (b.y - cam.y) * k
@@ -479,8 +498,31 @@ function drawShadows(ctx: CanvasRenderingContext2D, list: Building[]): void {
   for (let i = 0; i < list.length; i++) {
     const b = list[i],
       s = b.height * 0.2
+    if (b.flat) continue
     ctx.fillRect(b.x0 + s * 0.5, b.y0 + s * 0.5, b.x1 - b.x0, b.y1 - b.y0)
     ctx.fillRect(b.x0 + s, b.y0 + s, b.x1 - b.x0, b.y1 - b.y0)
+  }
+}
+
+/** Soft black silhouettes of the tree sprites, baked once so the shadows match the canopy shapes. */
+const treeShadow: (HTMLCanvasElement | null)[] = []
+
+function bakeTreeShadows(): void {
+  treeShadow.length = 0
+  for (const f of TREE_FILES) {
+    const im = images[f]
+    if (!im) {
+      treeShadow.push(null)
+      continue
+    }
+    const c = document.createElement('canvas')
+    c.width = c.height = 96
+    const x = c.getContext('2d')!
+    x.drawImage(im, 0, 0, 96, 96)
+    x.globalCompositeOperation = 'source-in'
+    x.fillStyle = 'rgba(0,0,0,0.34)'
+    x.fillRect(0, 0, 96, 96)
+    treeShadow.push(c)
   }
 }
 
@@ -489,6 +531,19 @@ function drawTrees(ctx: CanvasRenderingContext2D, city: City, vis: Visible): voi
   for (let i = 0; i < t.length; i++) {
     const p = t[i]
     if (p.x < vis.x0 || p.x > vis.x1 || p.y < vis.y0 || p.y > vis.y1) continue
+    const k = treeSpecies(p.c)
+    const sprite = images[TREE_FILES[k]]
+    if (sprite) {
+      const d = p.r * 2.5 // canopy diameter in metres
+      const sh = treeShadow[k]
+      if (sh) ctx.drawImage(sh, p.x - d / 2 + 1.6, p.y - d / 2 + 2, d, d)
+      ctx.save()
+      ctx.translate(p.x, p.y)
+      ctx.rotate(p.c * 97.3) // a top-down canopy can face any way: hides the repeats
+      ctx.drawImage(sprite, -d / 2, -d / 2, d, d)
+      ctx.restore()
+      continue
+    }
     ctx.fillStyle = 'rgba(0,0,0,0.22)'
     ctx.beginPath()
     ctx.arc(p.x + 1.5, p.y + 1.8, p.r, 0, 6.283)
@@ -632,6 +687,25 @@ export const Renderer = {
     pat.water = mk(makeTex(256, '#2a5b86', 46, 2400))
     pat.gravel = mk(makeTex(256, '#8a7b5c', 70, 3200))
     FX.init()
+  },
+
+  /** Swap in the photo textures once the art files have loaded (the procedural ones stay if a file is missing). */
+  initArt(ctx: CanvasRenderingContext2D): void {
+    const photo = (file: string, metres: number): CanvasPattern | null => {
+      const im = images[file]
+      if (!im) return null
+      const p = ctx.createPattern(im, 'repeat')
+      if (!p) return null
+      try {
+        p.setTransform(new DOMMatrix([metres / im.width, 0, 0, metres / im.height, 0, 0]))
+      } catch {
+        /* older browsers */
+      }
+      return p
+    }
+    pat.grass = photo(GRASS_FILES.meadow, 14) ?? pat.grass
+    pat.lawn = photo(GRASS_FILES.lawn, 14) ?? pat.lawn
+    bakeTreeShadows()
   },
 
   drawWorld(ctx: CanvasRenderingContext2D, cam: typeof Camera, alpha: number): void {

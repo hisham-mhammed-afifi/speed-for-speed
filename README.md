@@ -67,6 +67,13 @@ and the helicopter, launch ramps (go fast enough and you fly; cops can't follow 
 gravel and smashable cones, sawhorses and park fences (smash one while wanted for a small bounty). Props are streamed in as light
 physics bodies near the player, so the world stays cheap.
 
+Photo art (`public/world/`, drawn by `render/renderer.ts`, listed in `world/worldArt.ts`): top-down tree sprites (8 species, shadows baked from
+their silhouettes), seamless grass textures for parks and suburbs lawns, and a few landmark lots (a villa in the suburbs, an office campus in the
+port, a green-roof residence downtown). A lot is a photo laid over a block, turned and mirrored per placement, with collider rectangles measured
+on the picture so you can crash into its roofs. The source JPGs are not in the repo: `node scripts/build-assets.mjs "<folder>"` cuts out the
+backgrounds, makes the grass tile, and writes the optimised WebP files (needs `sharp`, a dev dependency). Missing files fall back to the old
+procedural drawing.
+
 Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you are heading (the road you are on and its straight
 continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
 give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.

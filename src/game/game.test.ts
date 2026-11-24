@@ -3,6 +3,7 @@ import { findPath } from './ai/pathfind'
 import { DEFAULT_RATING, Difficulty, scoreRun } from './ai/difficulty'
 import { CELL, HOT, Memory } from './ai/memory'
 import { predictRoute } from './ai/tactics'
+import { fitLot, LOTS, lotRect, treeSpecies, WORLD_FILES } from './world/worldArt'
 import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
 import { Car } from './physics/car'
 import { Phys } from './physics/world'
@@ -611,5 +612,82 @@ describe('adaptive difficulty (plan 3)', () => {
     Difficulty.load({ best: 0, total: 0, longest: 0, car: 0, skill: Number.NaN }, 'abc')
     expect(Difficulty.rating).toBe(DEFAULT_RATING)
     expect(Difficulty.override).toBeNull()
+  })
+})
+
+describe('photo art and landmark lots', () => {
+  const city = createCity()
+  const lots = city.blocks.filter((b) => b.lot)
+
+  it('every art file the game loads exists in public/', () => {
+    const found = Object.keys(import.meta.glob('/public/world/**/*.webp'))
+    for (const f of WORLD_FILES) expect(found, f).toContain('/public/' + f)
+  })
+
+  it('every tree value maps to one of the 8 sprites, and all of them get used', () => {
+    const used = new Set<number>()
+    for (let i = 0; i <= 1000; i++) used.add(treeSpecies(i / 1000))
+    expect([...used].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+  })
+
+  it('places each kind of lot in its own district, deterministically', () => {
+    expect(lots.length).toBeGreaterThan(0)
+    for (const art of Object.values(LOTS)) {
+      const mine = lots.filter((b) => b.lot!.art === art.id)
+      expect(mine.length).toBeGreaterThan(0)
+      expect(mine.length).toBeLessThanOrEqual(art.count)
+      for (const b of mine) expect(b.district).toBe(art.district)
+    }
+    const again = createCity().blocks.filter((b) => b.lot).map((b) => [b.i, b.j, b.lot!.art, b.lot!.rot, b.lot!.flipX, b.lot!.flipY])
+    expect(again).toEqual(lots.map((b) => [b.i, b.j, b.lot!.art, b.lot!.rot, b.lot!.flipX, b.lot!.flipY]))
+  })
+
+  it('lots only take blocks they fit without much stretching', () => {
+    for (const b of lots) {
+      const L = b.lot!
+      const fit = fitLot(LOTS[L.art], L.x0, L.y0, L.x1, L.y1)
+      expect(fit).not.toBeNull()
+      expect(fit!.rot).toBe(L.rot)
+      expect(fit!.distortion).toBeLessThan(1.4)
+    }
+  })
+
+  it('lot colliders are flat buildings that stay inside their block, off the roads', () => {
+    for (const b of lots) {
+      const mine = city.buildings.filter((q) => q.flat && q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)
+      expect(mine.length).toBe(LOTS[b.lot!.art].parts.length)
+      for (const q of mine) {
+        expect(q.hasHeli).toBe(false)
+        expect(q.x1).toBeGreaterThan(q.x0)
+        expect(q.y1).toBeGreaterThan(q.y0)
+      }
+    }
+    // no flat building anywhere outside a lot block
+    for (const q of city.buildings.filter((x) => x.flat)) expect(lots.some((b) => q.x0 >= b.x0 && q.x1 <= b.x1 && q.y0 >= b.y0 && q.y1 <= b.y1)).toBe(true)
+  })
+
+  it('lotRect honours turning and mirroring (the corners land on the right corners)', () => {
+    const base = { art: 'villa' as const, x0: 0, y0: 0, x1: 200, y1: 100, rot: 0 as const, flipX: false, flipY: false }
+    expect(lotRect(base, 0, 0, 0.5, 0.5)).toEqual([0, 0, 100, 50])
+    expect(lotRect({ ...base, flipX: true }, 0, 0, 0.5, 0.5)).toEqual([100, 0, 200, 50])
+    expect(lotRect({ ...base, flipY: true }, 0, 0, 0.5, 0.5)).toEqual([0, 50, 100, 100])
+    // quarter turn: the art's top-left corner ends up at the block's top-right
+    expect(lotRect({ ...base, rot: 1 }, 0, 0, 0.5, 0.5)).toEqual([100, 0, 200, 50])
+  })
+
+  it('the road graph is still fully connected with lots in place', () => {
+    const n = city.nodeCount
+    const seen = new Uint8Array(n)
+    const stack = [0]
+    seen[0] = 1
+    while (stack.length) {
+      const c = stack.pop()!
+      for (const nb of city.neighbors(c))
+        if (!seen[nb]) {
+          seen[nb] = 1
+          stack.push(nb)
+        }
+    }
+    expect(seen.every((v) => v === 1)).toBe(true)
   })
 })

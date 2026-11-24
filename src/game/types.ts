@@ -118,6 +118,8 @@ export interface Building {
   props: { ox: number; oy: number; w: number; h: number }[]
   hasHeli: boolean
   stamp: number
+  /** part of a landmark lot: the photo already shows its roof, so only the collider exists (nothing is drawn) */
+  flat?: boolean
 }
 
 export interface Wall {
@@ -136,6 +138,22 @@ export interface Block {
   y1: number
   type: 'build' | 'park' | 'plaza' | 'water'
   district: BlockDistrict
+  /** set when a photo landmark lot covers this block (see world/worldArt.ts) */
+  lot?: LotPlacement
+}
+
+export type LotId = 'villa' | 'campus' | 'residence'
+
+/** A landmark photo laid over a block: the rectangle it covers, turned a quarter and/or mirrored. */
+export interface LotPlacement {
+  art: LotId
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  rot: 0 | 1
+  flipX: boolean
+  flipY: boolean
 }
 
 export interface Tree {
