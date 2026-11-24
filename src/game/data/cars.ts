@@ -45,6 +45,19 @@ export const PLAYER_CARS: CarSpec[] = [
   mk({ id: 'graphite', name: 'Graphite GT', cls: 'Grand Tourer', file: 'cars/LS20261123150955.png', mass: 1800, top: kmh(238), accel: 6.4, grip: 11, durability: 1.1 }),
 ]
 
+/**
+ * Civilian traffic: the same nine bodies, but tuned like everyday cars (slower, softer, less grip) so they read as
+ * traffic rather than rival racers. Their speed is set by the lane driver, so this mostly affects crashes and recovery.
+ */
+export const TRAFFIC_CARS: CarSpec[] = PLAYER_CARS.map((c) => ({
+  ...c,
+  id: c.id + '_traffic',
+  top: c.top * 0.5,
+  accel: c.accel * 0.55,
+  grip: c.grip * 0.88,
+  durability: c.durability * 0.8,
+}))
+
 export const POLICE_SPEC: CarSpec = mk({
   id: 'police', name: 'Interceptor', cls: 'Police', file: 'cars/1795439954041.png', mass: 1750, top: kmh(256), accel: 6.9, grip: 11.6, durability: 1.15, police: true,
 })

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { findPath } from './ai/pathfind'
-import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC } from './data/cars'
+import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
 import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { game } from './state'
+import { carGrid } from './world/carGrid'
 import { createCity, SURF } from './world/city'
 import type { Building } from './types'
 
@@ -156,5 +157,67 @@ describe('Matter.js car physics (headless)', () => {
     Phys.removeCar(car)
     expect(Phys.engine!.world.bodies.length).toBe(before - 1)
     expect(car.body).toBeNull()
+  })
+})
+
+describe('busy roads (plan 4)', () => {
+  it('civilian cars are slower, softer variants of the nine bodies', () => {
+    expect(TRAFFIC_CARS).toHaveLength(PLAYER_CARS.length)
+    TRAFFIC_CARS.forEach((t, i) => {
+      expect(t.file).toBe(PLAYER_CARS[i].file)
+      expect(t.top).toBeLessThan(PLAYER_CARS[i].top)
+      expect(t.accel).toBeLessThan(PLAYER_CARS[i].accel)
+    })
+  })
+
+  it('spatial grid query matches a brute-force search', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296)
+    const cars = Array.from({ length: 80 }, () => {
+      const c = new Car(PLAYER_CARS[0], 'civil')
+      c.x = rnd() * 1800
+      c.y = rnd() * 1800
+      return c
+    })
+    carGrid.rebuild(cars)
+    const out: Car[] = []
+    for (let k = 0; k < 40; k++) {
+      const x = rnd() * 1800,
+        y = rnd() * 1800,
+        r = 10 + rnd() * 120
+      const expected = cars.filter((c) => Math.hypot(c.x - x, c.y - y) <= r).map((c) => c.id).sort()
+      const got = carGrid.query(x, y, r, out).map((c) => c.id).sort()
+      expect(got).toEqual(expected)
+    }
+  })
+
+  it('stays cheap with 60 cars in the Matter world', () => {
+    Phys.init({ buildings: [], walls: [] })
+    const cars: Car[] = []
+    for (let i = 0; i < 60; i++) {
+      const c = new Car(TRAFFIC_CARS[i % 9], 'civil')
+      Phys.addCar(c)
+      c.place((i % 10) * 40, Math.floor(i / 10) * 40, 0)
+      c.setSpeed(10)
+      cars.push(c)
+    }
+    for (let i = 0; i < 120; i++) {
+      for (const c of cars) c.applyControls(DT, SURF.asphalt)
+      Phys.step(DT)
+      for (const c of cars) c.readBack()
+    }
+    const t0 = performance.now()
+    const N = 600
+    for (let i = 0; i < N; i++) {
+      for (const c of cars) {
+        c.ctrl.throttle = 0.3
+        c.applyControls(DT, SURF.asphalt)
+      }
+      Phys.step(DT)
+      for (const c of cars) c.readBack()
+      carGrid.rebuild(cars)
+    }
+    const ms = (performance.now() - t0) / N
+    expect(ms).toBeLessThan(3) // ~0.3 ms in practice; this guards against accidental O(n^2) blow-ups
   })
 })

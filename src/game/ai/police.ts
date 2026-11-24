@@ -31,7 +31,7 @@ export interface PoliceUnit {
 }
 
 export const Police = {
-  ambientTarget: 5,
+  ambientTarget: 8,
   ambientTimer: 0,
 
   spawnUnit(x: number, y: number, theta: number, state: PoliceState, heavy: boolean): PoliceUnit {
@@ -120,7 +120,7 @@ export const Police = {
       switch (u.state) {
         case 'patrol': {
           patrolCount++
-          u.driver!.control(car, dt, game.cars)
+          u.driver!.control(car, dt)
           u.detectT -= dt
           if (u.detectT <= 0 && !H.active) {
             u.detectT = 0.3

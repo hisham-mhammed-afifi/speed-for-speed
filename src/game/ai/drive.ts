@@ -1,4 +1,5 @@
 import { clamp } from '../core/math'
+import { carGrid } from '../world/carGrid'
 import type { Car } from '../physics/car'
 import type { City } from '../world/city'
 
@@ -58,17 +59,19 @@ export function avoid(car: Car, city: City): boolean {
   return false
 }
 
-/** Slow down for cars directly ahead; returns a capped target speed. */
-export function capForTraffic(car: Car, cars: Car[], target: number, maxLook?: number): number {
+const nearScratch: Car[] = []
+
+/** Slow down for cars directly ahead; returns a capped target speed. Only looks at nearby cars (see carGrid). */
+export function capForTraffic(car: Car, target: number, maxLook?: number): number {
   const fx = Math.cos(car.theta),
     fy = Math.sin(car.theta)
   const look = maxLook || 8 + car.speed * 1.3
+  const cars = carGrid.query(car.x, car.y, look + 6, nearScratch)
   for (let k = 0; k < cars.length; k++) {
     const o = cars[k]
     if (o === car) continue
     const dx = o.x - car.x,
       dy = o.y - car.y
-    if (Math.abs(dx) > look + 6 || Math.abs(dy) > look + 6) continue
     const ahead = dx * fx + dy * fy
     if (ahead < 0 || ahead > look) continue
     const lat = Math.abs(dx * -fy + dy * fx)

@@ -14,6 +14,7 @@ import { drawHudCanvas, initHudMap } from './render/hudCanvas'
 import { Renderer } from './render/renderer'
 import { loadSave, writeSave } from './save'
 import { game } from './state'
+import { carGrid } from './world/carGrid'
 import { createCity } from './world/city'
 import { Traffic } from './world/traffic'
 import type { CarKind, CarSpec, RunResult, RunStats, SaveData } from './types'
@@ -56,9 +57,11 @@ class GameEngine {
     const detachInput = input.attach()
     touch.onChange = () => {
       store().setTouchActive(touch.active)
+      this.applyDensity()
       this.resize() // switching between touch and keyboard changes the resolution cap
     }
     store().setTouchActive(touch.active)
+    this.applyDensity()
 
     this.resize()
     Renderer.init(this.ctx)
@@ -95,6 +98,11 @@ class GameEngine {
       detachInput()
       touch.onChange = null
     }
+  }
+
+  /** Busy roads on desktop, a lighter city on phones so they keep 60 FPS. */
+  private applyDensity(): void {
+    Traffic.target = touch.active ? 30 : 45
   }
 
   // ---------------------------------------------------------------- world helpers (the `game` context)
@@ -171,8 +179,9 @@ class GameEngine {
     game.time = 0
     store().clearToasts()
     camera.snap()
-    for (let i = 0; i < 40 && game.civs.length < 18; i++) Traffic.spawn()
-    for (let i = 0; i < 12; i++) Police.spawnAmbient()
+    for (let i = 0; i < 160 && game.civs.length < Math.floor(Traffic.target * 0.7); i++) Traffic.spawn()
+    for (let i = 0; i < 20; i++) Police.spawnAmbient()
+    carGrid.rebuild(game.cars)
     game.state = 'play'
     loop.paused = false
     input.clearOnce()
@@ -308,6 +317,7 @@ class GameEngine {
     Phys.step(dt)
     for (let i = 0; i < game.cars.length; i++) game.cars[i].readBack()
     if (game.state !== 'play') return // an impact may have ended the run
+    carGrid.rebuild(game.cars)
     Traffic.update(dt)
     Police.update(dt)
     heat.update(dt)

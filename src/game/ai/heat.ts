@@ -5,7 +5,7 @@ import { Police } from './police'
 import type { PoliceUnit } from './police'
 
 const THRESH = [0, 45, 110, 190, 290]
-const COPS = [0, 3, 4, 6, 8, 9]
+const COPS = [0, 4, 6, 8, 10, 12]
 
 export interface Spike {
   x: number
