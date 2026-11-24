@@ -67,6 +67,10 @@ and the helicopter, launch ramps (go fast enough and you fly; cops can't follow 
 gravel and smashable cones, sawhorses and park fences (smash one while wanted for a small bounty). Props are streamed in as light
 physics bodies near the player, so the world stays cheap.
 
+Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you are heading (the road you are on and its straight
+continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
+give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.
+
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.
 

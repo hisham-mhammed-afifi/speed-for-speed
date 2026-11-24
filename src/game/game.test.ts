@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { findPath } from './ai/pathfind'
+import { predictRoute } from './ai/tactics'
 import { ALL_CAR_FILES, estimate, PLAYER_CARS, POLICE_SPEC, TRAFFIC_CARS } from './data/cars'
 import { Car } from './physics/car'
 import { Phys } from './physics/world'
@@ -415,3 +416,48 @@ describe('living map features (plan 6)', () => {
   })
 })
 
+
+describe('coordinated police tactics (plan 1)', () => {
+  const city = createCity()
+  // an interior intersection with a straight street through it
+  const i0 = 6,
+    j0 = 6
+  const n = city.nodeId(i0, j0)
+  const sx = city.nodeX(n),
+    sy = city.nodeY(n)
+
+  it('predicts the road ahead of a fast player, and nothing for a slow one', () => {
+    expect(predictRoute(city, sx + 30, sy, 3, 0)).toEqual([])
+    const r = predictRoute(city, sx + 30, sy, 28, 0)
+    expect(r.length).toBeGreaterThan(0)
+    for (const e of r) {
+      expect(e.dx).toBeGreaterThan(0.99) // along +x
+      expect(e.wy).toBeCloseTo(sy, 0) // on the street the player is on
+      expect(e.wx).toBeGreaterThan(sx + 30 + 24) // clearly ahead of the player
+      expect(e.eta).toBeGreaterThan(0.5)
+    }
+  })
+
+  it('later cut-off points have later arrival times', () => {
+    const r = predictRoute(city, sx + 30, sy, 28, 0)
+    if (r.length === 2) {
+      expect(r[1].eta).toBeGreaterThan(r[0].eta)
+      expect(r[1].wx).toBeGreaterThan(r[0].wx)
+    }
+  })
+
+  it('predicts in every direction and always lands on a drivable edge', () => {
+    for (const [vx, vy] of [
+      [28, 0],
+      [-28, 0],
+      [0, 28],
+      [0, -28],
+    ]) {
+      const r = predictRoute(city, sx + vx, sy + vy, vx, vy)
+      for (const e of r) {
+        expect(city.neighbors(e.n0)).toContain(e.n1)
+        expect(e.dx * vx + e.dy * vy).toBeGreaterThan(0)
+      }
+    }
+  })
+})

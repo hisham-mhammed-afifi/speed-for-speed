@@ -30,7 +30,7 @@ export function HelpScreen() {
           </tbody>
         </table>
         <ul className="tips">
-          <li>Heat rises the longer you run and the more cops you wreck: roadblocks at 3, spike strips at 4, a helicopter at 5.</li>
+          <li>Heat rises the longer you run and the more cops you wreck: units start cutting you off ahead from 2, roadblocks at 3, spike strips at 4, a helicopter at 5.</li>
           <li>Brake before corners. Grass slows you down, and heavy hits damage your car.</li>
           <li>
             Phone: drag your left thumb to steer; right thumb has GAS, BRAKE (hold to reverse), DRIFT and NITRO. The top-left buttons pause and reset your

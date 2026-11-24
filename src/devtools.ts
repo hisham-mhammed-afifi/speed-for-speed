@@ -1,5 +1,7 @@
 import { engine } from './game/engine'
 import { heat } from './game/ai/heat'
+import { Tactics } from './game/ai/tactics'
+import { input } from './game/core/input'
 import { loop } from './game/core/loop'
 import { Phys } from './game/physics/world'
 import { camera } from './game/render/camera'
@@ -24,11 +26,13 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     engine,
     game,
     heat,
+    input,
     loop,
     Phys,
     camera,
     Renderer,
     Props,
+    Tactics,
     store: useGameStore,
     update: (dt: number) => engine.update(dt),
     step: (seconds: number, dt = 1 / 120) => {

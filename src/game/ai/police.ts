@@ -1,13 +1,15 @@
 import { clamp } from '../core/math'
 import { avoid, speedTo, steerTo } from './drive'
 import { findPath } from './pathfind'
+import { Tactics } from './tactics'
+import type { Intercept } from './tactics'
 import { POLICE_HEAVY, POLICE_SPEC } from '../data/cars'
 import { FX } from '../render/effects'
 import { game } from '../state'
 import { LaneDriver } from '../world/traffic'
 import type { Car } from '../physics/car'
 
-export type PoliceState = 'patrol' | 'pursue' | 'block' | 'wrecked'
+export type PoliceState = 'patrol' | 'pursue' | 'intercept' | 'block' | 'wrecked'
 export type PoliceRole = 'ram' | 'flank' | 'block'
 
 export interface PoliceUnit {
@@ -28,6 +30,13 @@ export interface PoliceUnit {
   detectT: number
   pit: boolean
   blockT: number
+  /** intercept state: the spot to park at, time spent, time parked, parked yet, cooldown before the next dispatch */
+  ic: Intercept | null
+  icT: number
+  icHold: number
+  icPark: boolean
+  icArrived: boolean
+  icCool: number
 }
 
 export const Police = {
@@ -56,6 +65,12 @@ export const Police = {
       detectT: Math.random() * 0.3,
       pit: false,
       blockT: 0,
+      ic: null,
+      icT: 0,
+      icHold: 0,
+      icPark: false,
+      icArrived: false,
+      icCool: 0,
     }
     car.unit = u
     game.cops.push(u)
@@ -142,6 +157,13 @@ export const Police = {
             game.cops.splice(i, 1)
           }
           break
+        case 'intercept':
+          Police.intercept(u, dt, d)
+          if (d > 600) {
+            game.removeCar(car)
+            game.cops.splice(i, 1)
+          }
+          break
         case 'block': {
           const c = car.ctrl
           c.throttle = 0
@@ -189,6 +211,7 @@ export const Police = {
   },
 
   pursue(u: PoliceUnit, dt: number, dist: number): void {
+    if (u.icCool > 0) u.icCool -= dt
     const car = u.car,
       pl = game.player.car,
       H = game.heat,
@@ -296,6 +319,103 @@ export const Police = {
       car.ctrl.throttle = 0
       car.ctrl.brake = 1
       car.ctrl.steer *= -1
+    }
+  },
+
+  /** Give up the cut-off and go back to chasing. */
+  endIntercept(u: PoliceUnit, reason: string): void {
+    Tactics.log.push({ reason, t: u.icT, parked: u.icPark })
+    if (Tactics.log.length > 40) Tactics.log.shift()
+    u.state = 'pursue'
+    u.ic = null
+    u.icArrived = false
+    u.icCool = 10
+    u.path = null
+    u.role = 'flank'
+    u.car.boost = 1.3
+  },
+
+  /** Drive to a predicted spot ahead of the player, park across the road there, and hold the line. */
+  intercept(u: PoliceUnit, dt: number, dist: number): void {
+    const car = u.car,
+      pl = game.player.car,
+      city = game.city,
+      ic = u.ic
+    if (!ic || !u.path) return Police.endIntercept(u, 'no-target')
+    u.icT += dt
+    const wpDist = Math.hypot(ic.wx - car.x, ic.wy - car.y)
+    // how far the player still has to go to reach the spot (negative: they got past)
+    const plAhead = (ic.wx - pl.x) * ic.dx + (ic.wy - pl.y) * ic.dy
+    const turnedAway = pl.speed > 8 && pl.wvx * ic.dx + pl.wvy * ic.dy < pl.speed * 0.3 && Math.hypot(ic.wx - pl.x, ic.wy - pl.y) > 50
+    if (u.icT > 28) return Police.endIntercept(u, 'timeout')
+    if (plAhead < -10) return Police.endIntercept(u, 'player-passed')
+    if (turnedAway) return Police.endIntercept(u, 'player-turned')
+    if (u.icHold > 7) return Police.endIntercept(u, 'held')
+    car.boost = 1.2
+    const c = car.ctrl
+    if (u.icPark) {
+      u.icHold += dt
+      c.throttle = 0
+      c.brake = 1
+      c.handbrake = 1
+      c.steer = 0
+      c.nitro = 0
+      return
+    }
+    const path = u.path,
+      last = path.length - 1
+    let tx: number, ty: number, tspeed: number
+    if (u.pi >= last && Math.hypot(city.nodeX(path[last]) - car.x, city.nodeY(path[last]) - car.y) < 25) u.icArrived = true
+    if (!u.icArrived) {
+      // follow the road graph to the far end of the block
+      let nid = path[Math.min(u.pi, last)]
+      let nx = city.nodeX(nid),
+        ny = city.nodeY(nid)
+      if (Math.hypot(nx - car.x, ny - car.y) < 10 + car.speed * 0.45 && u.pi < last) {
+        u.pi++
+        nid = path[u.pi]
+        nx = city.nodeX(nid)
+        ny = city.nodeY(nid)
+      }
+      tx = nx
+      ty = ny
+      tspeed = 38
+      if (u.pi < last) {
+        const n2 = path[u.pi + 1]
+        const ax = nx - car.x,
+          ay = ny - car.y,
+          bx = city.nodeX(n2) - nx,
+          by = city.nodeY(n2) - ny
+        if ((ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) + 1e-6) < 0.6)
+          tspeed = Math.min(tspeed, Math.sqrt(72 + 18 * Math.max(Math.hypot(ax, ay) - 14, 0)))
+      }
+    } else {
+      tx = ic.wx
+      ty = ic.wy
+      tspeed = Math.max(6, Math.min(26, wpDist * 0.9))
+    }
+    if (u.icArrived && wpDist < 18) {
+      // swing across the lanes: aim at the kerb, creep, then stop
+      tx = ic.wx - ic.dy * 14
+      ty = ic.wy + ic.dx * 14
+      tspeed = 4
+      if (wpDist < 7 || car.speed < 1.5) u.icPark = true
+    }
+    const err = steerTo(car, tx, ty)
+    if (Math.abs(err) > 0.8) tspeed = Math.min(tspeed, 12) // facing the wrong way: slow down and turn first
+    speedTo(car, tspeed)
+    avoid(car, city)
+    if (car.speed < 1.2 && dist > 6 && u.reverseT <= 0 && !u.icPark) u.stuckT += dt
+    else u.stuckT = Math.max(0, u.stuckT - dt)
+    if (u.stuckT > 1.0) {
+      u.reverseT = 1.2
+      u.stuckT = 0
+    }
+    if (u.reverseT > 0) {
+      u.reverseT -= dt
+      c.throttle = 0
+      c.brake = 1
+      c.steer *= -1
     }
   },
 }

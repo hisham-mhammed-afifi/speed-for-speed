@@ -127,7 +127,7 @@ export const Traffic = {
     Traffic.timer -= dt
     Traffic.tick++
     const pl = game.player.car
-    const sirens = game.heat.active ? game.cops.filter((u) => u.state === 'pursue') : []
+    const sirens = game.heat.active ? game.cops.filter((u) => u.state === 'pursue' || u.state === 'intercept') : []
     const plFast = pl.speed > 18
     for (let i = game.civs.length - 1; i >= 0; i--) {
       const u = game.civs[i],

@@ -2,6 +2,7 @@ import { clamp } from '../core/math'
 import { Phys } from '../physics/world'
 import { game } from '../state'
 import { Police } from './police'
+import { Tactics } from './tactics'
 import type { PoliceUnit } from './police'
 
 const THRESH = [0, 45, 110, 190, 290]
@@ -95,6 +96,9 @@ export class HeatManager {
   nearCount = 0
   spawnT = 0
   roleT = 0
+  tacticsT = 0
+  /** coordinated tactics (interceptors); switchable so the AI can be compared with and without */
+  tactics = true
   blockT = 0
   spikeT = 0
   heliT = 0
@@ -118,6 +122,8 @@ export class HeatManager {
     this.nearCount = 0
     this.spawnT = 0
     this.roleT = 0
+    this.tacticsT = 0
+    Tactics.reset()
     this.blockT = 15
     this.spikeT = 20
     this.heliT = 0
@@ -155,7 +161,7 @@ export class HeatManager {
   stop(): void {
     this.active = false
     for (const u of game.cops) {
-      if (u.state === 'pursue' || u.state === 'block') Police.makePatrol(u)
+      if (u.state === 'pursue' || u.state === 'block' || u.state === 'intercept') Police.makePatrol(u)
     }
     this.blocks = []
     this.spikes = []
@@ -260,10 +266,10 @@ export class HeatManager {
       near = 0,
       pursuers = 0
     for (const u of game.cops) {
-      if (u.state !== 'pursue') continue
+      if (u.state !== 'pursue' && u.state !== 'intercept') continue
       pursuers++
       const d = Math.hypot(u.car.x - pl.x, u.car.y - pl.y)
-      if ((u.los && d < 130) || d < 70) visible = true // a cop right beside you counts even without line of sight
+      if ((u.state === 'pursue' && u.los && d < 130) || d < 70) visible = true // a cop right beside you counts even without line of sight
       if (d < 14) near++
     }
     this.nearCount = near
@@ -349,6 +355,18 @@ export class HeatManager {
           side = -side
         }
       })
+      // a crawling player gets boxed in: the second-closest unit takes the spot in front
+      if (list.length >= 2 && pl.speed < 10 && this.level >= 2) list[1].role = 'block'
+    }
+    // coordinated tactics: send a few units to park across the road ahead of the player
+    Tactics.tick(dt)
+    this.tacticsT -= dt
+    if (this.tactics && this.tacticsT <= 0 && this.grace <= 0 && this.level >= 2) {
+      this.tacticsT = 1.5
+      Tactics.dispatch(
+        this.level,
+        game.cops.filter((u) => u.state === 'pursue'),
+      )
     }
     // roadblocks & spikes
     if (this.level >= 3) {

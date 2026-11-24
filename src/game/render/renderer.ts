@@ -562,7 +562,7 @@ function drawDebug(ctx: CanvasRenderingContext2D): void {
   const c = game.player.car
   ctx.lineWidth = 0.15
   for (const u of game.cops) {
-    if (u.state === 'pursue' && u.path) {
+    if ((u.state === 'pursue' || u.state === 'intercept') && u.path) {
       ctx.strokeStyle = 'rgba(255,80,80,0.7)'
       ctx.beginPath()
       ctx.moveTo(u.car.x, u.car.y)

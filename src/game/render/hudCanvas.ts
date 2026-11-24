@@ -222,7 +222,8 @@ function minimap(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
   const blink = Math.floor(game.time * 6) % 2
   for (const u of game.cops) {
     if (u.state === 'wrecked') continue
-    dot(u.car.x, u.car.y, 3.2, u.state === 'patrol' ? '#6a8fd6' : blink ? '#ff3b3b' : '#4a7dff')
+    if (u.state === 'intercept') dot(u.car.x, u.car.y, 4, blink ? '#ffb02e' : '#ff3b3b') // cutting you off: amber blink
+    else dot(u.car.x, u.car.y, 3.2, u.state === 'patrol' ? '#6a8fd6' : blink ? '#ff3b3b' : '#4a7dff')
   }
   if (H.heli) dot(H.heli.x, H.heli.y, 4.5, '#ffffff')
   // player arrow
