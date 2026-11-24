@@ -1,7 +1,7 @@
 import Matter from 'matter-js'
 import { game } from '../state'
 import type { Car } from './car'
-import type { Building, Wall } from '../types'
+import type { Building, PropSpot, Wall } from '../types'
 
 const { Engine, Bodies, Body, Composite, Events } = Matter
 
@@ -10,6 +10,11 @@ const { Engine, Bodies, Body, Composite, Events } = Matter
  * (a car is ~47x19 units, the size range Matter's contact tolerances are tuned for).
  */
 const S = 10
+
+/** collision categories: cars, buildings/walls, props. An airborne car only collides with statics. */
+const CAT_CAR = 0x0001
+const CAT_STATIC = 0x0002
+const CAT_PROP = 0x0004
 
 interface PairCollision {
   normal: { x: number; y: number }
@@ -23,7 +28,7 @@ export const Phys = {
   engine: null as Matter.Engine | null,
   cars: [] as Car[],
 
-  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[] }): void {
+  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[]; waterWalls?: Wall[] }): void {
     const engine = Engine.create({ positionIterations: 8, velocityIterations: 6, enableSleeping: false })
     engine.gravity.x = 0
     engine.gravity.y = 0
@@ -32,10 +37,17 @@ export const Phys = {
     Phys.cars = []
     const statics: Matter.Body[] = []
     const add = (cx: number, cy: number, hx: number, hy: number) =>
-      statics.push(Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, { isStatic: true, friction: 0.3, restitution: 0.15, label: 'static' }))
+      statics.push(Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, {
+          isStatic: true,
+          friction: 0.3,
+          restitution: 0.15,
+          label: 'static',
+          collisionFilter: { category: CAT_STATIC, mask: 0xffff },
+        }))
     for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy)
     for (const w of city.walls) add(w.x, w.y, w.hx, w.hy)
     for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy)
+    for (const w of city.waterWalls ?? []) add(w.x, w.y, w.hx, w.hy)
     Composite.add(engine.world, statics)
     Events.on(engine, 'collisionStart', onCollisionStart)
   },
@@ -49,6 +61,7 @@ export const Phys = {
       frictionStatic: 0.5,
       restitution: 0.15,
       label: 'car',
+      collisionFilter: { category: CAT_CAR, mask: 0xffff },
     })
     Body.setMass(body, s.mass)
     Body.setAngle(body, car.theta)
@@ -69,6 +82,41 @@ export const Phys = {
   reset(): void {
     for (const c of Phys.cars) if (c.body) Composite.remove(Phys.engine!.world, c.body)
     Phys.cars.length = 0
+  },
+
+  /** Airborne cars only collide with buildings and walls, so they fly over traffic and props. */
+  setAirborne(car: Car, on: boolean): void {
+    if (car.body) car.body.collisionFilter.mask = on ? CAT_STATIC : 0xffff
+  },
+
+  /** Create the physics body for a prop spot (called when the player gets close). */
+  addProp(spot: PropSpot): Matter.Body {
+    const opts = { frictionAir: 0.05, friction: 0.4, restitution: 0.35, label: 'prop', collisionFilter: { category: CAT_PROP, mask: CAT_CAR | CAT_STATIC | CAT_PROP } }
+    let body: Matter.Body
+    switch (spot.kind) {
+      case 'cone':
+        body = Bodies.circle(spot.x * S, spot.y * S, 0.4 * S, opts)
+        Body.setMass(body, 8)
+        break
+      case 'sawhorse':
+        body = Bodies.rectangle(spot.x * S, spot.y * S, 1.9 * S, 0.5 * S, opts)
+        Body.setMass(body, 25)
+        break
+      case 'crate':
+        body = Bodies.rectangle(spot.x * S, spot.y * S, 1 * S, 1 * S, opts)
+        Body.setMass(body, 30)
+        break
+      default:
+        body = Bodies.rectangle(spot.x * S, spot.y * S, 3 * S, 0.35 * S, opts)
+        Body.setMass(body, 35)
+    }
+    Body.setAngle(body, spot.angle)
+    body.plugin.prop = spot
+    Composite.add(Phys.engine!.world, body)
+    return body
+  },
+  removeProp(body: Matter.Body): void {
+    Composite.remove(Phys.engine!.world, body)
   },
 
   setMass(car: Car, mass: number): void {
@@ -123,6 +171,13 @@ function onCollisionStart(ev: Matter.IEventCollision<Matter.Engine>) {
     const ca: Car | null = A.plugin.car || null
     const cb: Car | null = B.plugin.car || null
     if (!ca && !cb) continue
+    // a car meeting a prop is a smash, not a crash: no damage, the prop just flies
+    const propSpot: PropSpot | undefined = A.plugin.prop || B.plugin.prop
+    if (propSpot) {
+      const car = ca || cb
+      if (car) game.onPropHit(car, propSpot, car.speed, (ca ? B : A).position.x / S, (ca ? B : A).position.y / S)
+      continue
+    }
     const col = (pair as unknown as { collision: PairCollision }).collision
     // orient the normal from A to B, then count only the approaching speed (a bounce apart is not a new hit)
     let nx = col.normal.x,

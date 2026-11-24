@@ -54,6 +54,13 @@ export class Car {
   wp: number[] = [NaN, NaN, NaN, NaN] // last skid positions (rear wheels)
   flash = Math.random() * 6
   lastHit = -1
+  /** seconds of flight left (0 = on the ground); set by launch() at a jump ramp */
+  air = 0
+  airTotal = 0
+  /** brief grip penalty after landing */
+  landT = 0
+  /** set for one step when a flight ends, so the engine can add dust and shake */
+  justLanded = false
   /** set for police cars so the renderer can tell wrecked units from active ones */
   unit?: PoliceUnit
 
@@ -89,6 +96,12 @@ export class Car {
     if (this.body) Phys.setVelocity(this.body, this.wvx, this.wvy, 0)
   }
 
+  /** Throw the car into the air for `seconds`. Airborne cars have no grip and pass over traffic and props. */
+  launch(seconds: number): void {
+    this.air = this.airTotal = seconds
+    Phys.setAirborne(this, true)
+  }
+
   /** local (forward, right) offset -> world */
   toWorld(lx: number, ly: number, out: Vec2): Vec2 {
     const c = Math.cos(this.theta),
@@ -107,6 +120,25 @@ export class Car {
     this.pth = this.theta
     this.surfaceKind = surf.kind
     if (this.flat > 0) this.flat -= dt
+    if (this.landT > 0) this.landT -= dt
+    if (this.air > 0) {
+      this.air -= dt
+      if (this.air <= 0) {
+        this.air = 0
+        Phys.setAirborne(this, false)
+        this.landT = 0.6
+        this.justLanded = true
+      } else {
+        // in the air: no grip, no steering, just momentum
+        this.braking = false
+        this.sliding = false
+        this.skid = 0
+        this.aF = 0
+        this.aL = 0
+        this.gripUse = 0
+        return
+      }
+    }
     const vF = this.vx,
       vL = this.vy,
       sp = this.speed
@@ -138,7 +170,7 @@ export class Car {
     // ---- grip budget ----
     const health = this.health / 100
     const flat = this.flat > 0
-    const grip = s.grip * surf.grip * (flat ? 0.65 : 1) * (0.85 + 0.15 * health)
+    const grip = s.grip * surf.grip * (flat ? 0.65 : 1) * (this.landT > 0 ? 0.5 : 1) * (0.85 + 0.15 * health)
 
     // ---- longitudinal ----
     const nitroWant = c.nitro > 0.5 && this.nitro > 0.02 && drive > 0 && vF > 1

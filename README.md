@@ -53,7 +53,7 @@ src/
     core/                    math, input (keyboard/gamepad/touch), loop, assets, viewport
     data/cars.ts             car specs + car-select stats
     physics/                 car.ts (arcade car on a Matter body), world.ts (Matter engine, impacts)
-    world/                   city.ts (procedural city: districts, highway ring + ramps, road graph), traffic.ts (lane drivers), carGrid.ts (spatial grid)
+    world/                   city.ts (procedural city: districts, highway ring, river, tunnels, jumps, road graph), traffic.ts (lane drivers), carGrid.ts (spatial grid), props.ts (smashable props)
     ai/                      pathfind (A*), drive, police units, heat (pursuit, roadblocks, spikes, helicopter)
     render/                  camera, effects (particles, skid marks), renderer (world), hudCanvas (speedo, minimap)
 public/cars/                 car sprites
@@ -61,6 +61,11 @@ public/cars/                 car sprites
 
 The city has three districts (downtown towers, an industrial port with container yards, suburbs with houses and lawns) picked by a seeded
 Voronoi map, ringed by a fast three-lane highway that is walled off with concrete barriers except at a few ramps.
+
+Living map features: a river that splits the city (crossed only at three bridges), tunnels under buildings that hide you from cops
+and the helicopter, launch ramps (go fast enough and you fly; cops can't follow through the air), and construction zones with loose
+gravel and smashable cones, sawhorses and park fences (smash one while wanted for a small bounty). Props are streamed in as light
+physics bodies near the player, so the world stays cheap.
 
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.

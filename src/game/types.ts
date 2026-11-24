@@ -14,7 +14,7 @@ export interface Controls {
   nitro: number
 }
 
-export type SurfaceKind = 'asphalt' | 'sidewalk' | 'lot' | 'grass'
+export type SurfaceKind = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel'
 
 export interface Surface {
   kind: SurfaceKind
@@ -126,7 +126,7 @@ export interface Block {
   y0: number
   x1: number
   y1: number
-  type: 'build' | 'park' | 'plaza'
+  type: 'build' | 'park' | 'plaza' | 'water'
   district: BlockDistrict
 }
 
@@ -135,4 +135,37 @@ export interface Tree {
   y: number
   r: number
   c: number
+}
+
+export interface Rect {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/** A covered stretch of street: blocks line of sight (and the helicopter's spotlight) while you are inside. */
+export interface Tunnel extends Rect {
+  horiz: boolean
+}
+
+/** A launch ramp: a car inside the rectangle, moving along (dx, dy) fast enough, is thrown into the air. */
+export interface Jump {
+  x: number
+  y: number
+  hx: number
+  hy: number
+  dx: number
+  dy: number
+}
+
+export type PropKind = 'cone' | 'sawhorse' | 'fence' | 'crate'
+
+/** A smashable roadside object. Spots are data; physics bodies only exist while the player is close (world/props.ts). */
+export interface PropSpot {
+  kind: PropKind
+  x: number
+  y: number
+  angle: number
+  gone: boolean
 }

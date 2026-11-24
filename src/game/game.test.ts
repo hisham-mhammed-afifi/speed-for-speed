@@ -5,7 +5,7 @@ import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
-import { createCity, RAMPS, SURF } from './world/city'
+import { BRIDGES, createCity, RAMPS, RIVER_I, SURF } from './world/city'
 import type { Building } from './types'
 
 const DT = 1 / 120
@@ -298,3 +298,120 @@ describe('city districts (plan 5)', () => {
     expect(city.hasLOS(xHwy, y4, xIn, y4)).toBe(true) // through the ramp opening: clear
   })
 })
+
+describe('living map features (plan 6)', () => {
+  const city = createCity()
+
+  it('splits the city with a river crossed only by the bridge streets', () => {
+    const id = (i: number, j: number) => city.nodeId(i, j)
+    for (let j = 1; j < city.NH - 1; j++) {
+      const crosses = city.neighbors(id(RIVER_I, j)).includes(id(RIVER_I + 1, j))
+      expect(crosses).toBe(BRIDGES.includes(j))
+    }
+    expect(city.bridges).toHaveLength(BRIDGES.length)
+    // every intersection stays reachable (through the bridges)
+    const from = id(8, 8)
+    for (let n = 0; n < city.nodeCount; n += 7) expect(findPath(city, from, n)).not.toBeNull()
+    // west-to-east trips have to use a bridge
+    const path = findPath(city, id(2, 6), id(RIVER_I + 3, 6))!
+    const hop = path.findIndex((n, k) => k > 0 && path[k - 1] % city.NV === RIVER_I && n % city.NV === RIVER_I + 1)
+    expect(hop).toBeGreaterThan(0)
+    expect(BRIDGES).toContain(((path[hop] / city.NV) | 0))
+  })
+
+  it('makes the water solid and keeps bridge decks open', () => {
+    const mx = (city.river.x0 + city.river.x1) / 2
+    const waterY = (city.hy[5] + city.hy[6]) / 2 // between two streets, nowhere near a bridge
+    expect(city.inWater(mx, waterY)).toBe(true)
+    expect(city.isObstacle(mx, waterY)).toBe(true)
+    for (const j of BRIDGES) expect(city.inWater(mx, city.hy[j])).toBe(false)
+    expect(city.waterWalls.length).toBeGreaterThan(0)
+  })
+
+  it('has tunnels that block line of sight and hide you from the helicopter', () => {
+    expect(city.tunnels.length).toBeGreaterThan(3)
+    const t = city.tunnels[0]
+    const cx = (t.x0 + t.x1) / 2,
+      cy = (t.y0 + t.y1) / 2
+    expect(city.inTunnel(cx, cy)).toBe(true)
+    const outsideX = t.horiz ? t.x0 - 12 : cx,
+      outsideY = t.horiz ? cy : t.y0 - 12
+    expect(city.hasLOS(outsideX, outsideY, cx, cy)).toBe(false)
+  })
+
+  it('places ramps, construction gravel and props deterministically', () => {
+    const again = createCity()
+    expect(again.jumps).toEqual(city.jumps)
+    expect(again.propSpots.length).toBe(city.propSpots.length)
+    expect(city.jumps.length).toBeGreaterThan(2)
+    expect(city.gravel.length).toBeGreaterThan(3)
+    const kinds = new Set(city.propSpots.map((p) => p.kind))
+    expect([...kinds].sort()).toEqual(['cone', 'fence', 'sawhorse'])
+    const g = city.gravel[0]
+    expect(city.surfaceAt((g.x0 + g.x1) / 2, (g.y0 + g.y1) / 2).kind).toBe('gravel')
+  })
+
+  it('launches an airborne car over another car and lands it with less grip', () => {
+    Phys.init({ buildings: [], walls: [] }) // open ground, so only the thing under test can be hit
+    const a = new Car(PLAYER_CARS[0], 'player')
+    Phys.addCar(a)
+    a.place(0, 0, 0)
+    const b = new Car(PLAYER_CARS[1], 'civil')
+    Phys.addCar(b)
+    b.place(30, 0, 0)
+    a.setSpeed(30)
+    a.launch(1.2)
+    let hits = 0
+    const oi = game.onImpact
+    game.onImpact = () => {
+      hits++
+    }
+    let landed = false
+    for (let i = 0; i < 240; i++) {
+      a.ctrl.throttle = 0
+      a.applyControls(DT, SURF.asphalt)
+      b.applyControls(DT, SURF.asphalt)
+      Phys.step(DT)
+      a.readBack()
+      b.readBack()
+      if (a.justLanded) landed = true
+    }
+    game.onImpact = oi
+    expect(a.x).toBeGreaterThan(b.x) // flew past it...
+    expect(hits).toBe(0) // ...without touching it
+    expect(landed).toBe(true)
+    expect(a.air).toBe(0)
+  })
+
+  it('a prop hit is a smash, not a crash', () => {
+    Phys.init({ buildings: [], walls: [] }) // open ground, so only the thing under test can be hit
+    const car = new Car(PLAYER_CARS[0], 'player')
+    Phys.addCar(car)
+    car.place(0, 0, 0)
+    const spot = { kind: 'cone' as const, x: 20, y: 0, angle: 0, gone: false }
+    const body = Phys.addProp(spot)
+    const oi = game.onImpact,
+      op = game.onPropHit
+    let crashes = 0,
+      smashes = 0
+    game.onImpact = () => {
+      crashes++
+    }
+    game.onPropHit = () => {
+      smashes++
+    }
+    car.setSpeed(15)
+    for (let i = 0; i < 240; i++) {
+      car.applyControls(DT, SURF.asphalt)
+      Phys.step(DT)
+      car.readBack()
+    }
+    game.onImpact = oi
+    game.onPropHit = op
+    expect(smashes).toBeGreaterThan(0)
+    expect(crashes).toBe(0)
+    expect(car.speed).toBeGreaterThan(12) // a cone barely slows a car
+    expect(body.position.x / Phys.S).toBeGreaterThan(20.5) // and it got knocked down the road
+  })
+})
+

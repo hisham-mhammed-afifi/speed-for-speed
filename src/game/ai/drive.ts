@@ -43,14 +43,14 @@ export function avoid(car: Car, city: City): boolean {
   const d = clamp(5 + sp * 0.7, 6, 34)
   const fx = Math.cos(car.theta),
     fy = Math.sin(car.theta)
-  if (city.pointInBuilding(car.x + fx * d, car.y + fy * d) || city.pointInBuilding(car.x + fx * d * 0.5, car.y + fy * d * 0.5)) {
+  if (city.isObstacle(car.x + fx * d, car.y + fy * d) || city.isObstacle(car.x + fx * d * 0.5, car.y + fy * d * 0.5)) {
     const a = 0.55
     const lx = Math.cos(car.theta - a),
       ly = Math.sin(car.theta - a)
     const rx = Math.cos(car.theta + a),
       ry = Math.sin(car.theta + a)
-    const lBlocked = city.pointInBuilding(car.x + lx * d, car.y + ly * d)
-    const rBlocked = city.pointInBuilding(car.x + rx * d, car.y + ry * d)
+    const lBlocked = city.isObstacle(car.x + lx * d, car.y + ly * d)
+    const rBlocked = city.isObstacle(car.x + rx * d, car.y + ry * d)
     car.ctrl.steer = lBlocked && !rBlocked ? 1 : rBlocked && !lBlocked ? -1 : car.ctrl.steer >= 0 ? 1 : -1
     car.ctrl.throttle *= 0.3
     car.ctrl.brake = Math.max(car.ctrl.brake, clamp((sp - 10) / 30, 0, 0.8))

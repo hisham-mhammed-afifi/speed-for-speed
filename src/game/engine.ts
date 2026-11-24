@@ -4,6 +4,7 @@ import { Police } from './ai/police'
 import { loadImages } from './core/assets'
 import { input, touch } from './core/input'
 import { loop, startLoop } from './core/loop'
+import { clamp } from './core/math'
 import { readSafeArea } from './core/viewport'
 import { ALL_CAR_FILES, PLAYER_CARS } from './data/cars'
 import { Car } from './physics/car'
@@ -15,6 +16,7 @@ import { Renderer } from './render/renderer'
 import { loadSave, writeSave } from './save'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
+import { Props } from './world/props'
 import { createCity } from './world/city'
 import { Traffic } from './world/traffic'
 import { DISTRICT_NAMES } from './types'
@@ -36,6 +38,7 @@ class GameEngine {
   private titleT = 0
   private hudT = 0
   private districtT = 0
+  private propT = 0
   private lastDistrict: District | null = null
   private carIndex = 0
   private saveData: SaveData = loadSave()
@@ -124,7 +127,16 @@ class GameEngine {
     }
     game.spotFree = (x, y, r) => {
       for (let i = 0; i < game.cars.length; i++) if (Math.hypot(game.cars[i].x - x, game.cars[i].y - y) < r) return false
-      return !game.city.pointInBuilding(x, y)
+      return !game.city.isObstacle(x, y)
+    }
+    game.onPropHit = (car, spot, speed, x, y) => {
+      if (speed < 1.5) return
+      const first = Props.hit(spot)
+      if (first) {
+        for (let i = 0; i < 4; i++) FX.debris(x, y, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8)
+        if (car === game.player?.car && heat.active) heat.bounty += 10 // smash bonus
+      }
+      if (car === game.player?.car) camera.addShake(Math.min(0.2, speed / 90))
     }
     game.toast = (text, color) => store().pushToast(text, color)
     game.shake = (a) => camera.addShake(a)
@@ -168,6 +180,7 @@ class GameEngine {
     game.cars.length = 0
     game.civs.length = 0
     game.cops.length = 0
+    Props.reset()
     Phys.reset()
     FX.clearSkids()
     heat.reset()
@@ -323,6 +336,12 @@ class GameEngine {
     for (let i = 0; i < game.cars.length; i++) game.cars[i].readBack()
     if (game.state !== 'play') return // an impact may have ended the run
     carGrid.rebuild(game.cars)
+    this.updateJumps()
+    this.propT += dt
+    if (this.propT >= 0.4) {
+      Props.update(this.propT)
+      this.propT = 0
+    }
     Traffic.update(dt)
     Police.update(dt)
     heat.update(dt)
@@ -339,6 +358,30 @@ class GameEngine {
       if (d !== this.lastDistrict) {
         if (this.lastDistrict !== null) game.toast('Entering: ' + DISTRICT_NAMES[d], '#9ec5ff')
         this.lastDistrict = d
+      }
+    }
+  }
+
+  /** Launch cars that hit a ramp fast enough, and add dust/shake when a flight ends. */
+  private updateJumps(): void {
+    const jumps = game.city.jumps
+    const pl = game.player.car
+    for (let i = 0; i < game.cars.length; i++) {
+      const c = game.cars[i]
+      if (c.justLanded) {
+        c.justLanded = false
+        for (let k = 0; k < 6; k++) FX.smoke(c.x, c.y, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6, 1.3, 0.55)
+        if (c === pl) camera.addShake(0.4)
+      }
+      if (c.air > 0 || c.speed < 13) continue
+      for (let k = 0; k < jumps.length; k++) {
+        const j = jumps[k]
+        if (Math.abs(c.x - j.x) > j.hx || Math.abs(c.y - j.y) > j.hy) continue
+        const along = c.wvx * j.dx + c.wvy * j.dy
+        if (along < 13) continue
+        c.launch(clamp(0.25 + (along - 13) * 0.035, 0.3, 1.3))
+        if (c === pl) game.toast('AIRBORNE!', '#ffd23f')
+        break
       }
     }
   }

@@ -40,6 +40,13 @@ export function initHudMap(city: City): void {
     x.fillStyle = bd.kind === 'container' ? '#3b2f2b' : bd.kind === 'house' ? '#2f3a30' : bd.kind === 'tower' ? '#1c2029' : '#26231f'
     x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)
   }
+  // the river, its bridges and the tunnels (a dark line so you can plan an escape route)
+  x.fillStyle = '#1f4e7a'
+  x.fillRect(city.river.x0, city.river.y0, city.river.x1 - city.river.x0, city.river.y1 - city.river.y0)
+  x.fillStyle = '#4a4f58'
+  for (const br of city.bridges) x.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
+  x.fillStyle = '#0c0d10'
+  for (const t of city.tunnels) x.fillRect(t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0)
   // the highway ring in amber
   x.fillStyle = '#7a6a3a'
   for (const i of [0, city.NV - 1]) x.fillRect(city.vx[i] - city.vw[i] / 2, b.minY, city.vw[i], b.maxY - b.minY)

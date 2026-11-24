@@ -1,11 +1,12 @@
 import { rng } from '../core/math'
-import type { Block, BlockDistrict, Building, BuildingKind, District, Surface, Tree, Wall } from '../types'
+import type { Block, BlockDistrict, Building, BuildingKind, District, Jump, PropSpot, Rect, Surface, Tree, Tunnel, Wall } from '../types'
 
-export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass', Surface> = {
+export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', Surface> = {
   asphalt: { kind: 'asphalt', grip: 1.0, roll: 1.0 },
   sidewalk: { kind: 'sidewalk', grip: 0.9, roll: 1.6 },
   lot: { kind: 'lot', grip: 0.85, roll: 1.5 },
   grass: { kind: 'grass', grip: 0.58, roll: 4.2 },
+  gravel: { kind: 'gravel', grip: 0.78, roll: 2.6 },
 }
 
 export type RoadType = 'highway' | 'avenue' | 'street' | 'alley'
@@ -14,6 +15,9 @@ const SIDEWALK = 3
 const CELL = 80
 /** The ring highway can only be entered / left at these grid lines. */
 export const RAMPS = [4, 8, 12]
+/** Water fills the block column between vertical lines RIVER_I and RIVER_I + 1; only the BRIDGES streets cross it. */
+export const RIVER_I = 11
+export const BRIDGES = [3, 8, 13]
 
 export interface LanePoint {
   x: number
@@ -44,6 +48,14 @@ export interface City {
   walls: Wall[]
   /** concrete barriers along the highway ring (static colliders, drawn as barriers) */
   barriers: Wall[]
+  /** river: its rectangle, the solid water strips between bridges, and the bridge decks */
+  river: Rect
+  waterWalls: Wall[]
+  bridges: Rect[]
+  tunnels: Tunnel[]
+  jumps: Jump[]
+  gravel: Rect[]
+  propSpots: PropSpot[]
   seeds: DistrictSeed[]
   bounds: { minX: number; minY: number; maxX: number; maxY: number }
   nodeCount: number
@@ -61,6 +73,10 @@ export interface City {
   districtAt(x: number, y: number): District
   surfaceAt(x: number, y: number): Surface
   pointInBuilding(x: number, y: number): boolean
+  /** anything a car cannot drive through: buildings, barriers, water (AI probes and spawn checks use this) */
+  isObstacle(x: number, y: number): boolean
+  inWater(x: number, y: number): boolean
+  inTunnel(x: number, y: number): boolean
   queryBuildings(x0: number, y0: number, x1: number, y1: number, out: Building[]): Building[]
   hasLOS(x0: number, y0: number, x1: number, y1: number): boolean
   lanePoint(a: number, b: number, t: number): LanePoint
@@ -160,6 +176,11 @@ export function createCity(seed = 20261123): City {
         y1 = hy[j + 1] - hw[j + 1] / 2
       const district = nearestSeed((x0 + x1) / 2, (y0 + y1) / 2)
       const b: Block = { i, j, x0, x1, y0, y1, type: 'build', district }
+      if (i === RIVER_I) {
+        b.type = 'water'
+        blocks.push(b)
+        continue
+      }
       const w = x1 - x0,
         h = y1 - y0
       const r = R()
@@ -376,6 +397,134 @@ export function createCity(seed = 20261123): City {
       }
   }
 
+
+  // ---------- the river: a column of water crossed only at the BRIDGES streets ----------
+  const waterX0 = vx[RIVER_I] + vw[RIVER_I] / 2,
+    waterX1 = vx[RIVER_I + 1] - vw[RIVER_I + 1] / 2
+  const riverY0 = hy[0] + hw[0] / 2,
+    riverY1 = hy[NH - 1] - hw[NH - 1] / 2
+  const river: Rect = { x0: waterX0, x1: waterX1, y0: riverY0, y1: riverY1 }
+  const bridges: Rect[] = BRIDGES.map((j) => ({ x0: waterX0, x1: waterX1, y0: hy[j] - hw[j] / 2, y1: hy[j] + hw[j] / 2 }))
+  const waterWalls: Wall[] = []
+  {
+    let from = riverY0
+    const emit = (a: number, b: number) => {
+      if (b - a < 0.5) return
+      waterWalls.push({ x: (waterX0 + waterX1) / 2, y: (a + b) / 2, hx: (waterX1 - waterX0) / 2, hy: (b - a) / 2 })
+    }
+    for (const br of bridges) {
+      emit(from, br.y0)
+      from = br.y1
+    }
+    emit(from, riverY1)
+  }
+
+  // ---------- street features: tunnels, jump ramps, construction zones ----------
+  interface Edge {
+    i: number
+    j: number
+    horiz: boolean
+  }
+  const edges: Edge[] = []
+  for (let j = 1; j < NH - 1; j++)
+    for (let i = 1; i < NV - 2; i++) if (i !== RIVER_I && !BRIDGES.includes(j) && H.type[j] !== 'alley') edges.push({ i, j, horiz: true })
+  for (let i = 1; i < NV - 1; i++)
+    for (let j = 1; j < NH - 2; j++) if (i !== RIVER_I && i !== RIVER_I + 1 && V.type[i] !== 'alley') edges.push({ i, j, horiz: false })
+  for (let k = edges.length - 1; k > 0; k--) {
+    const r = (R() * (k + 1)) | 0
+    ;[edges[k], edges[r]] = [edges[r], edges[k]]
+  }
+  const usedNodes = new Set<number>()
+  const takeEdge = (): Edge | null => {
+    for (let k = 0; k < edges.length; k++) {
+      const e = edges[k]
+      const a = e.j * NV + e.i,
+        b = e.horiz ? a + 1 : a + NV
+      if (usedNodes.has(a) || usedNodes.has(b)) continue
+      usedNodes.add(a)
+      usedNodes.add(b)
+      edges.splice(k, 1)
+      return e
+    }
+    return null
+  }
+  const edgeGeo = (e: Edge) => {
+    const ax = vx[e.i],
+      ay = hy[e.j]
+    const bx = e.horiz ? vx[e.i + 1] : ax,
+      by = e.horiz ? ay : hy[e.j + 1]
+    const len = Math.hypot(bx - ax, by - ay)
+    return { ax, ay, ux: (bx - ax) / len, uy: (by - ay) / len, len, w: e.horiz ? hw[e.j] : vw[e.i] }
+  }
+
+  const tunnels: Tunnel[] = []
+  for (let n = 0; n < 8; n++) {
+    const e = takeEdge()
+    if (!e) break
+    tunnels.push(
+      e.horiz
+        ? { horiz: true, x0: vx[e.i] + vw[e.i] / 2, x1: vx[e.i + 1] - vw[e.i + 1] / 2, y0: hy[e.j] - hw[e.j] / 2, y1: hy[e.j] + hw[e.j] / 2 }
+        : { horiz: false, x0: vx[e.i] - vw[e.i] / 2, x1: vx[e.i] + vw[e.i] / 2, y0: hy[e.j] + hw[e.j] / 2, y1: hy[e.j + 1] - hw[e.j + 1] / 2 },
+    )
+  }
+
+  const jumps: Jump[] = []
+  for (let n = 0; n < 6; n++) {
+    const e = takeEdge()
+    if (!e) break
+    const g = edgeGeo(e)
+    const off = g.w * 0.25
+    const cx = g.ax + g.ux * g.len * 0.42 - g.uy * off,
+      cy = g.ay + g.uy * g.len * 0.42 + g.ux * off
+    const lat = Math.max(2.2, g.w * 0.1)
+    jumps.push({ x: cx, y: cy, hx: e.horiz ? 7 : lat, hy: e.horiz ? lat : 7, dx: g.ux, dy: g.uy })
+  }
+
+  const gravel: Rect[] = []
+  const propSpots: PropSpot[] = []
+  const addProp = (kind: PropSpot['kind'], x: number, y: number, angle: number) => propSpots.push({ kind, x, y, angle, gone: false })
+  for (let n = 0; n < 10; n++) {
+    const e = takeEdge()
+    if (!e) break
+    const g = edgeGeo(e)
+    const off = g.w * 0.25
+    const zone = Math.min(42, g.len * 0.45)
+    const d0 = g.len * 0.28,
+      d1 = d0 + zone
+    const lane = (d: number) => ({ x: g.ax + g.ux * d - g.uy * off, y: g.ay + g.uy * d + g.ux * off })
+    for (let d = d0; d <= d1; d += 5) {
+      const p = lane(d)
+      addProp('cone', p.x + (R() - 0.5) * 0.5, p.y + (R() - 0.5) * 0.5, 0)
+    }
+    const perp = Math.atan2(g.ux, -g.uy) // across the lane
+    for (const d of [d0 - 3, d1 + 3]) {
+      const p = lane(d)
+      addProp('sawhorse', p.x, p.y, perp)
+    }
+    const c0 = lane(d0 - 2),
+      c1 = lane(d1 + 2)
+    const lat = g.w * 0.12 + 1.2
+    gravel.push(
+      e.horiz
+        ? { x0: Math.min(c0.x, c1.x), x1: Math.max(c0.x, c1.x), y0: c0.y - lat, y1: c0.y + lat }
+        : { x0: c0.x - lat, x1: c0.x + lat, y0: Math.min(c0.y, c1.y), y1: Math.max(c0.y, c1.y) },
+    )
+  }
+  // park fences: a row of light panels along one roadside edge of each park (smash through for a shortcut)
+  for (const b of blocks) {
+    if (b.type !== 'park') continue
+    const side = (R() * 4) | 0
+    const horizEdge = side < 2
+    const from = (horizEdge ? b.x0 : b.y0) + 6,
+      to = (horizEdge ? b.x1 : b.y1) - 6
+    for (let t = from; t < to; t += 3.2) {
+      if (R() < 0.12) continue
+      if (horizEdge) addProp('fence', t, side === 0 ? b.y0 + 1.5 : b.y1 - 1.5, 0)
+      else addProp('fence', side === 2 ? b.x0 + 1.5 : b.x1 - 1.5, t, Math.PI / 2)
+    }
+  }
+  const inRect = (r: Rect, x: number, y: number) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1
+
   const city: City = {
     NV,
     NH,
@@ -390,6 +539,13 @@ export function createCity(seed = 20261123): City {
     trees,
     walls,
     barriers,
+    river,
+    waterWalls,
+    bridges,
+    tunnels,
+    jumps,
+    gravel,
+    propSpots,
     seeds,
     bounds: { minX, minY, maxX, maxY },
 
@@ -408,6 +564,8 @@ export function createCity(seed = 20261123): City {
         const nRing = onRingV(ni) || onRingH(nj)
         // ring <-> interior only through a ramp (the ring-side node must be a ramp)
         if (ring !== nRing && !(ring ? isRamp(i, j) : isRamp(ni, nj))) return
+        // the river is crossed only by the bridge streets
+        if (nj === j && Math.min(i, ni) === RIVER_I && Math.max(i, ni) === RIVER_I + 1 && !BRIDGES.includes(j)) return
         out.push(nj * NV + ni)
       }
       if (i > 0) add(i - 1, j)
@@ -443,7 +601,10 @@ export function createCity(seed = 20261123): City {
     },
     surfaceAt(x, y) {
       if (x < minX || x > maxX || y < minY || y > maxY) return SURF.lot
-      if (city.colRoad(x) >= 0 || city.rowRoad(y) >= 0) return SURF.asphalt
+      if (city.colRoad(x) >= 0 || city.rowRoad(y) >= 0) {
+        for (let k = 0; k < gravel.length; k++) if (inRect(gravel[k], x, y)) return SURF.gravel // construction zones
+        return SURF.asphalt
+      }
       let i = 0
       while (i < NV - 2 && x >= vx[i + 1]) i++
       let j = 0
@@ -470,6 +631,20 @@ export function createCity(seed = 20261123): City {
           if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return true
         }
       }
+      return false
+    },
+    inWater(x, y) {
+      for (let k = 0; k < waterWalls.length; k++) {
+        const w = waterWalls[k]
+        if (Math.abs(x - w.x) <= w.hx && Math.abs(y - w.y) <= w.hy) return true
+      }
+      return false
+    },
+    isObstacle(x, y) {
+      return city.pointInBuilding(x, y) || city.inWater(x, y)
+    },
+    inTunnel(x, y) {
+      for (let k = 0; k < tunnels.length; k++) if (inRect(tunnels[k], x, y)) return true
       return false
     },
     queryBuildings(x0, y0, x1, y1, out) {
@@ -500,7 +675,9 @@ export function createCity(seed = 20261123): City {
       const n = Math.ceil(d / 4)
       for (let k = 1; k < n; k++) {
         const t = k / n
-        if (city.pointInBuilding(x0 + dx * t, y0 + dy * t)) return false
+        const px = x0 + dx * t,
+          py = y0 + dy * t
+        if (city.pointInBuilding(px, py) || city.inTunnel(px, py)) return false // buildings, barriers and tunnel roofs all block sight
       }
       return true
     },

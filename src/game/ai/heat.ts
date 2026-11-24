@@ -63,6 +63,7 @@ function aheadSpot(dist: number): AheadSpot | null {
     x = clamp(x, city.vx[0] + 40, city.vx[city.NV - 1] - 40)
     let k = 0
     while (k < city.NV - 2 && x >= city.vx[k + 1]) k++
+    if (!city.neighbors(city.nodeId(k, j)).includes(city.nodeId(k + 1, j))) return null // that stretch is blocked (river without a bridge, ...)
     return { x: (city.vx[k] + city.vx[k + 1]) / 2, y: city.hy[j], horiz: true, w: city.hw[j] }
   }
   let y = pl.y + Math.sign(pl.wvy) * dist
@@ -70,6 +71,7 @@ function aheadSpot(dist: number): AheadSpot | null {
   y = clamp(y, city.hy[0] + 40, city.hy[city.NH - 1] - 40)
   let k = 0
   while (k < city.NH - 2 && y >= city.hy[k + 1]) k++
+  if (!city.neighbors(city.nodeId(i, k)).includes(city.nodeId(i, k + 1))) return null
   return { x: city.vx[i], y: (city.hy[k] + city.hy[k + 1]) / 2, horiz: false, w: city.vw[i] }
 }
 
@@ -294,7 +296,7 @@ export class HeatManager {
       h.vy += ((dy / d) * sp - h.vy) * Math.min(1, dt * 1.6)
       h.x += h.vx * dt
       h.y += h.vy * dt
-      if (h.life > 0 && Math.hypot(h.x - pl.x, h.y - pl.y) < 20) this.heliLit = true
+      if (h.life > 0 && Math.hypot(h.x - pl.x, h.y - pl.y) < 20 && !game.city.inTunnel(pl.x, pl.y)) this.heliLit = true // a tunnel hides you from the spotlight
       if (h.life <= 0 && Math.hypot(h.x - pl.x, h.y - pl.y) > 700) {
         this.heli = null
         this.heliT = 40

@@ -6,6 +6,8 @@ import { FX } from './effects'
 import type { Visible } from './effects'
 import type { camera as Camera } from './camera'
 import type { Car } from '../physics/car'
+import { BRIDGES, RIVER_I } from '../world/city'
+import { Props } from '../world/props'
 import type { City } from '../world/city'
 import type { Heli, Spike } from '../ai/heat'
 import type { Building, Vec2 } from '../types'
@@ -25,7 +27,7 @@ function makeTex(size: number, base: string, spread: number, count: number): HTM
   return c
 }
 
-type PatternName = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'port' | 'lawn' | 'plaza'
+type PatternName = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'port' | 'lawn' | 'plaza' | 'water' | 'gravel'
 const pat = {} as Record<PatternName, CanvasPattern>
 
 // ---------------------------------------------------------------- ground
@@ -45,6 +47,33 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
     ctx.strokeStyle = 'rgba(0,0,0,0.35)'
     ctx.lineWidth = 0.3
     ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
+  }
+  // the river, with bridge decks (rails on both sides) where the bridge streets cross it
+  const rv = city.river
+  if (rv.x1 >= vis.x0 && rv.x0 <= vis.x1) {
+    ctx.fillStyle = pat.water
+    ctx.fillRect(rv.x0, rv.y0, rv.x1 - rv.x0, rv.y1 - rv.y0)
+    ctx.strokeStyle = 'rgba(190,225,250,0.16)'
+    ctx.lineWidth = 0.25
+    for (let y = Math.max(rv.y0, vis.y0); y < Math.min(rv.y1, vis.y1); y += 9) {
+      ctx.beginPath()
+      ctx.moveTo(rv.x0 + 4, y)
+      ctx.lineTo(rv.x1 - 4, y + 2.5)
+      ctx.stroke()
+    }
+    for (const br of city.bridges) {
+      if (br.y1 < vis.y0 || br.y0 > vis.y1) continue
+      ctx.fillStyle = pat.asphalt
+      ctx.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
+      ctx.strokeStyle = '#cfd2d8'
+      ctx.lineWidth = 0.6
+      ctx.beginPath()
+      ctx.moveTo(br.x0, br.y0 + 0.3)
+      ctx.lineTo(br.x1, br.y0 + 0.3)
+      ctx.moveTo(br.x0, br.y1 - 0.3)
+      ctx.lineTo(br.x1, br.y1 - 0.3)
+      ctx.stroke()
+    }
   }
   // outer barrier
   ctx.strokeStyle = '#7b7e84'
@@ -125,6 +154,7 @@ function drawMarkings(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
       const x0 = city.vx[i] + city.vw[i] / 2 + 5,
         x1 = city.vx[i + 1] - city.vw[i + 1] / 2 - 5
       if (x1 < vis.x0 || x0 > vis.x1) continue
+      if (i === RIVER_I && !BRIDGES.includes(j)) continue // water, not road
       drawRoadSeg(ctx, true, y, w, city.ht[j], x0, x1)
     }
   }
@@ -159,6 +189,126 @@ function drawMarkings(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
   ctx.fill()
 }
 
+/** Gravel under construction zones (drawn over the road markings). */
+function drawGravel(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
+  for (const g of city.gravel) {
+    if (g.x1 < vis.x0 || g.x0 > vis.x1 || g.y1 < vis.y0 || g.y0 > vis.y1) continue
+    ctx.fillStyle = pat.gravel
+    ctx.fillRect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0)
+    ctx.strokeStyle = 'rgba(255,140,40,0.7)'
+    ctx.lineWidth = 0.22
+    ctx.setLineDash([1.2, 1])
+    ctx.strokeRect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0)
+    ctx.setLineDash([])
+  }
+}
+
+/** Launch ramps: hazard-striped wedges with a chevron pointing the way. */
+function drawJumps(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
+  for (const j of city.jumps) {
+    if (j.x + j.hx < vis.x0 || j.x - j.hx > vis.x1 || j.y + j.hy < vis.y0 || j.y - j.hy > vis.y1) continue
+    ctx.save()
+    ctx.translate(j.x, j.y)
+    ctx.rotate(Math.atan2(j.dy, j.dx))
+    const L = Math.max(j.hx, j.hy),
+      Wd = Math.min(j.hx, j.hy)
+    ctx.fillStyle = '#3a3320'
+    ctx.fillRect(-L, -Wd, L * 2, Wd * 2)
+    ctx.fillStyle = '#e8b923'
+    for (let x = -L + 1; x < L - 1; x += 3) {
+      ctx.beginPath()
+      ctx.moveTo(x, -Wd)
+      ctx.lineTo(x + 1.4, -Wd)
+      ctx.lineTo(x + 2.4, Wd)
+      ctx.lineTo(x + 1, Wd)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 0.3
+    ctx.beginPath()
+    ctx.moveTo(L - 1.6, -Wd * 0.7)
+    ctx.lineTo(L - 0.4, 0)
+    ctx.lineTo(L - 1.6, Wd * 0.7)
+    ctx.stroke()
+    ctx.restore()
+  }
+}
+
+/** Smashable props (cones, sawhorses, park fences) that currently have a physics body. */
+function drawProps(ctx: CanvasRenderingContext2D, vis: Visible): void {
+  const S = Phys.S
+  for (const a of Props.active) {
+    const b = a.body
+    const x = b.position.x / S,
+      y = b.position.y / S
+    if (x < vis.x0 || x > vis.x1 || y < vis.y0 || y > vis.y1) continue
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(b.angle)
+    ctx.globalAlpha = a.hitAge > 5 ? Math.max(0, 1 - (a.hitAge - 5) / 2) : 1
+    switch (a.spot.kind) {
+      case 'cone':
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'
+        ctx.beginPath()
+        ctx.arc(0.15, 0.2, 0.42, 0, 6.283)
+        ctx.fill()
+        ctx.fillStyle = '#ff7a1a'
+        ctx.beginPath()
+        ctx.arc(0, 0, 0.4, 0, 6.283)
+        ctx.fill()
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = 0.12
+        ctx.beginPath()
+        ctx.arc(0, 0, 0.2, 0, 6.283)
+        ctx.stroke()
+        break
+      case 'sawhorse':
+        ctx.fillStyle = '#f3f3f3'
+        ctx.fillRect(-0.95, -0.25, 1.9, 0.5)
+        ctx.fillStyle = '#d6322b'
+        for (let k = -0.8; k < 0.8; k += 0.6) ctx.fillRect(k, -0.25, 0.3, 0.5)
+        break
+      case 'crate':
+        ctx.fillStyle = '#8a6a3c'
+        ctx.fillRect(-0.5, -0.5, 1, 1)
+        ctx.strokeStyle = '#5c4524'
+        ctx.lineWidth = 0.1
+        ctx.strokeRect(-0.45, -0.45, 0.9, 0.9)
+        break
+      default:
+        ctx.fillStyle = '#b9b2a2'
+        ctx.fillRect(-1.5, -0.18, 3, 0.36)
+        ctx.fillStyle = '#7d776a'
+        ctx.fillRect(-1.5, -0.04, 3, 0.08)
+    }
+    ctx.restore()
+  }
+  ctx.globalAlpha = 1
+}
+
+/** Tunnel roofs: drawn over the cars, so the car inside fades into the dark. */
+function drawTunnels(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
+  for (const t of city.tunnels) {
+    if (t.x1 < vis.x0 || t.x0 > vis.x1 || t.y1 < vis.y0 || t.y0 > vis.y1) continue
+    ctx.fillStyle = 'rgba(14,16,20,0.86)'
+    ctx.fillRect(t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0)
+    // ceiling lamps down the middle
+    ctx.fillStyle = 'rgba(255,214,140,0.8)'
+    if (t.horiz) {
+      const cy = (t.y0 + t.y1) / 2
+      for (let x = t.x0 + 4; x < t.x1 - 2; x += 8) ctx.fillRect(x, cy - 0.25, 1.4, 0.5)
+    } else {
+      const cx = (t.x0 + t.x1) / 2
+      for (let y = t.y0 + 4; y < t.y1 - 2; y += 8) ctx.fillRect(cx - 0.25, y, 0.5, 1.4)
+    }
+    // portal frame
+    ctx.strokeStyle = '#8b8f97'
+    ctx.lineWidth = 0.7
+    ctx.strokeRect(t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0)
+  }
+}
+
 /** Concrete highway barriers (they are also static colliders). */
 function drawBarriers(ctx: CanvasRenderingContext2D, city: City, vis: Visible): void {
   const list = city.barriers
@@ -178,12 +328,15 @@ function drawBarriers(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
 // ---------------------------------------------------------------- cars
 const lightTmp: Vec2 = { x: 0, y: 0 }
 
+const lift = (car: Car) => (car.air > 0 ? Math.sin(Math.PI * (1 - car.air / car.airTotal)) : 0)
+
 function drawCarShadow(ctx: CanvasRenderingContext2D, car: Car, x: number, y: number, th: number): void {
   const s = car.spec
+  const up = lift(car)
   ctx.save()
-  ctx.translate(x + 0.4, y + 0.5)
+  ctx.translate(x + 0.4 + up * 3.2, y + 0.5 + up * 4)
   ctx.rotate(th)
-  ctx.globalAlpha = 0.32
+  ctx.globalAlpha = 0.32 - up * 0.14
   ctx.fillStyle = '#000'
   const l = s.len * 0.96,
     w = s.hitW * 0.98
@@ -199,6 +352,8 @@ function drawCarBody(ctx: CanvasRenderingContext2D, car: Car, x: number, y: numb
   ctx.save()
   ctx.translate(x, y)
   ctx.rotate(th + Math.PI)
+  const grow = 1 + lift(car) * 0.32 // a jumping car comes closer to the camera
+  ctx.scale(grow, grow)
   const dw = s.len * (s.heavy ? 1.03 : 1)
   if (img) {
     const dh = (dw * img.height) / img.width
@@ -474,6 +629,8 @@ export const Renderer = {
     pat.lawn = mk(makeTex(256, '#4c7a3a', 50, 2600))
     pat.port = mk(makeTex(256, '#585d63', 44, 2200))
     pat.plaza = mk(makeTex(256, '#8d9096', 30, 900))
+    pat.water = mk(makeTex(256, '#2a5b86', 46, 2400))
+    pat.gravel = mk(makeTex(256, '#8a7b5c', 70, 3200))
     FX.init()
   },
 
@@ -482,8 +639,11 @@ export const Renderer = {
       vis = cam.vis
     drawGround(ctx, city, vis)
     drawMarkings(ctx, city, vis)
+    drawGravel(ctx, city, vis)
+    drawJumps(ctx, city, vis)
     drawBarriers(ctx, city, vis)
     FX.drawSkids(ctx, vis)
+    drawProps(ctx, vis)
     drawSpikes(ctx, game.heat.spikes)
     const blds = city.queryBuildings(vis.x0, vis.y0, vis.x1, vis.y1, qb)
     drawShadows(ctx, blds)
@@ -514,6 +674,7 @@ export const Renderer = {
     }
     FX.drawParticles(ctx, vis, true)
 
+    drawTunnels(ctx, city, vis)
     // buildings and trees sit above everything on the ground
     for (let i = 0; i < blds.length; i++) drawBuilding(ctx, blds[i], cam)
     drawTrees(ctx, city, vis)

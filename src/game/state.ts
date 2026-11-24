@@ -3,7 +3,7 @@ import type { City } from './world/city'
 import type { Civ } from './world/traffic'
 import type { PoliceUnit } from './ai/police'
 import type { HeatManager } from './ai/heat'
-import type { CarKind, CarSpec, GameState, RunResult } from './types'
+import type { CarKind, CarSpec, GameState, PropSpot, RunResult } from './types'
 
 /**
  * The shared game context every engine module reads (the old global `HL.G`).
@@ -29,6 +29,8 @@ export interface Game {
   endRun(kind: RunResult): void
   onImpact(a: Car | null, b: Car | null, dvA: number, dvB: number, x: number, y: number, nx: number, ny: number): void
   resetCar(): void
+  /** a car smashed into a roadside prop (cone, fence, ...) */
+  onPropHit(car: Car, prop: PropSpot, speed: number, x: number, y: number): void
 }
 
 const notReady = (): never => {
@@ -52,4 +54,5 @@ export const game: Game = {
   endRun: () => {},
   onImpact: () => {},
   resetCar: () => {},
+  onPropHit: () => {},
 }
