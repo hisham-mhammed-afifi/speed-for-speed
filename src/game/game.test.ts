@@ -11,7 +11,9 @@ import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
-import { BRIDGES, createCity, LANE_OFFSET, RAMPS, RIVER_I, SURF } from './world/city'
+import { BRIDGES, LANE_OFFSET, RAMPS, RIVER_I, SURF, TILE } from './world/city'
+import type { Tile } from './world/city'
+import { createCity, World } from './world/world'
 import type { Building } from './types'
 
 const DT = 1 / 120
@@ -910,5 +912,213 @@ describe('performance: static streaming, loop budget, quality tiers, 60 Hz physi
     c2.setSpeed(200 / 3.6)
     run(c2, 4, 1 / 60)
     expect(c2.x).toBeLessThan(bar.x0 + 0.5)
+  })
+})
+
+describe('the endless world: tiles, windows and recentering', () => {
+  const sig = (t: Tile) => [t.buildings.length, t.trees.length, t.riverCol, t.name, Math.round(t.x0), Math.round(t.y1), t.buildings[0]?.x0.toFixed(2), t.propSpots.length].join('|')
+
+  beforeEach(() => World.init(777))
+
+  it('a tile is a pure function of (seed, tx, ty): regenerating gives the identical tile', () => {
+    const first = [World.tile(3, -2), World.tile(-7, 5), World.tile(0, 0)].map(sig)
+    World.cache.clear()
+    const again = [World.tile(3, -2), World.tile(-7, 5), World.tile(0, 0)].map(sig)
+    expect(again).toEqual(first)
+    expect(sig(World.tile(1, 1))).not.toEqual(sig(World.tile(2, 1))) // and different tiles differ
+  })
+
+  it('neighbouring tiles share their boundary highway exactly, so roads never jump at a tile edge', () => {
+    for (const [tx, ty] of [
+      [0, 0],
+      [4, -3],
+      [-5, 2],
+    ]) {
+      const a = World.tile(tx, ty),
+        r = World.tile(tx + 1, ty),
+        d = World.tile(tx, ty + 1)
+      expect(r.V.pos[0]).toBeCloseTo(a.V.pos[16], 6)
+      expect(a.V.type[16]).toBe('highway')
+      expect(r.V.type[0]).toBe('highway')
+      expect(d.H.pos[0]).toBeCloseTo(a.H.pos[16], 6)
+      expect(d.H.type[0]).toBe('highway')
+      // the lines of one tile column are the same for every tile in that column
+      expect(World.tile(tx, ty + 3).V.pos).toEqual(a.V.pos)
+    }
+  })
+
+  it('a window joins 3 x 3 tiles into one road grid with a highway every 16 lines, and tile lookups agree', () => {
+    const city = World.build(2, -1, 1)
+    expect(city.NV).toBe(49)
+    expect(city.tiles.length).toBe(9)
+    for (let i = 0; i < city.NV; i++) expect(city.vt[i] === 'highway').toBe(i % 16 === 0)
+    for (let j = 0; j < city.NH; j++) expect(city.ht[j] === 'highway').toBe(j % 16 === 0)
+    for (let i = 1; i < city.NV; i++) expect(city.vx[i]).toBeGreaterThan(city.vx[i - 1])
+    const centre = city.tiles[4]
+    expect([centre.tx, centre.ty]).toEqual([2, -1])
+    const mx = (centre.x0 + centre.x1) / 2,
+      my = (centre.y0 + centre.y1) / 2
+    expect(city.tileAt(mx, my)).toBe(centre)
+    expect(World.tileIndexAt(mx, my)).toEqual({ tx: 2, ty: -1 })
+  })
+
+  it('the road graph connects tiles: A* finds routes between far-apart tiles of a window', () => {
+    for (const seed of [777, 1234, 99]) {
+      World.init(seed)
+      const city = World.build(0, 0, 1)
+      const pairs: [number, number][] = [
+        [city.nodeId(8, 8), city.nodeId(40, 40)],
+        [city.nodeId(5, 43), city.nodeId(44, 6)],
+        [city.nodeId(24, 24), city.nodeId(24, 3)],
+        [city.nodeId(10, 24), city.nodeId(38, 24)],
+      ]
+      for (const [a, b] of pairs) {
+        const p = findPath(city, a, b)
+        expect(p, `seed ${seed}: ${a} -> ${b}`).not.toBeNull()
+      }
+    }
+  })
+
+  it('highways run straight across tile corners: the barrier strips stop at the crossing highway', () => {
+    const city = World.build(0, 0, 1)
+    for (const [ci, cj] of [
+      [16, 16],
+      [32, 16],
+      [16, 32],
+      [32, 32],
+    ]) {
+      const x = city.vx[ci],
+        y = city.hy[cj],
+        hw = city.vw[ci] / 2 - 1,
+        hh = city.hw[cj] / 2 - 1
+      for (const b of city.barriers) {
+        const overlaps = Math.abs(b.x - x) < b.hx + hw && Math.abs(b.y - y) < b.hy + hh
+        expect(overlaps, `a barrier blocks the interchange at line (${ci}, ${cj})`).toBe(false)
+      }
+    }
+    // and there is a barrier on both sides of a shared highway (one from each tile)
+    const x = city.vx[16]
+    const left = city.barriers.filter((b) => Math.abs(b.x - (x - city.vw[16] / 2 - 0.6)) < 0.01 && b.hy > 20)
+    const right = city.barriers.filter((b) => Math.abs(b.x - (x + city.vw[16] / 2 + 0.6)) < 0.01 && b.hy > 20)
+    expect(left.length).toBeGreaterThan(0)
+    expect(right.length).toBeGreaterThan(0)
+  })
+
+  it('no building touches a road anywhere in the 9 tiles', () => {
+    const city = World.build(-3, 4, 1)
+    for (const b of city.buildings) {
+      if (b.flat) continue
+      for (let i = 0; i < city.NV; i++) if (!(b.x1 <= city.vx[i] - city.vw[i] / 2 + 1e-6 || b.x0 >= city.vx[i] + city.vw[i] / 2 - 1e-6)) throw new Error(`building at ${b.x0},${b.y0} overlaps road line ${i}`)
+      for (let j = 0; j < city.NH; j++) if (!(b.y1 <= city.hy[j] - city.hw[j] / 2 + 1e-6 || b.y0 >= city.hy[j] + city.hw[j] / 2 - 1e-6)) throw new Error(`building at ${b.x0},${b.y0} overlaps road row ${j}`)
+    }
+  })
+
+  it('moving the window keeps world coordinates: a node id shifted by whole tiles lands on the same point', () => {
+    const old = World.build(0, 0, 1)
+    for (const [dx, dy] of [
+      [1, 0],
+      [0, -1],
+      [-1, 1],
+    ]) {
+      const next = World.build(dx, dy, 1)
+      const di = (old.tx0 - next.tx0) * TILE,
+        dj = (old.ty0 - next.ty0) * TILE
+      for (let k = 0; k < 300; k++) {
+        const id = old.randomNode()
+        const i = (id % old.NV) + di,
+          j = ((id / old.NV) | 0) + dj
+        if (i < 0 || j < 0 || i >= next.NV || j >= next.NH) continue
+        const nid = next.nodeId(i, j)
+        expect(next.nodeX(nid)).toBeCloseTo(old.nodeX(id), 6)
+        expect(next.nodeY(nid)).toBeCloseTo(old.nodeY(id), 6)
+      }
+      // shared tiles are literally the same data, so buildings and colliders are not duplicated or lost
+      const shared = old.tiles.filter((t) => next.tiles.includes(t))
+      expect(shared.length).toBe((3 - Math.abs(dx)) * (3 - Math.abs(dy)))
+    }
+  })
+
+  it('the tile cache is bounded however far you travel', () => {
+    for (let t = 0; t < 120; t++) World.tile(t, (t * 7) % 13)
+    expect(World.cache.size).toBeLessThanOrEqual(22)
+  })
+
+  it('the window only recentres once the player is 100 m into the next tile', () => {
+    const w = World
+    const edge = w.axisV.originOf(1)
+    expect(w.centerFor(edge + 40, 500, 0, 0)).toEqual([0, 0]) // just across: stay put
+    expect(w.centerFor(edge + 140, 500, 0, 0)).toEqual([1, 0])
+    expect(w.centerFor(edge - 40, 500, 1, 0)).toEqual([1, 0]) // and back again: no flicker
+    expect(w.centerFor(edge - 140, 500, 1, 0)).toEqual([0, 0])
+    expect(w.centerFor(-99999, 500, 0, 0)[0]).toBeLessThan(-30) // teleports work too
+  })
+
+  it('randomNodeNear picks nodes around the player, not anywhere in a 5 km window', () => {
+    const city = World.build(0, 0, 1)
+    const px = city.vx[24],
+      py = city.hy[24]
+    for (let k = 0; k < 200; k++) {
+      const n = city.randomNodeNear(px, py, 150, 360)
+      const d = Math.hypot(city.nodeX(n) - px, city.nodeY(n) - py)
+      expect(d).toBeGreaterThan(40)
+      expect(d).toBeLessThan(520)
+    }
+  })
+
+  it('rivers: bridges are the only crossings, in every tile of a window', () => {
+    for (const seed of [777, 4242]) {
+      World.init(seed)
+      const city = World.build(1, 1, 1)
+      for (const t of city.tiles.filter((q) => q.riverCol >= 0)) {
+        const a = Math.round((t.tx - city.tx0)),
+          b = Math.round((t.ty - city.ty0))
+        for (let k = 1; k < TILE; k++) {
+          const i = a * TILE + t.riverCol,
+            j = b * TILE + k
+          const crossable = city.neighbors(city.nodeId(i, j)).includes(city.nodeId(i + 1, j))
+          expect(crossable, `tile ${t.tx},${t.ty} row ${k}`).toBe(t.bridgeRows.includes(k))
+        }
+      }
+    }
+  })
+
+  it('static collider bodies are created lazily, only for colliders that come near the player', () => {
+    World.init(777)
+    const city = World.build(0, 0, 1)
+    Phys.init(city)
+    const withBody = city.statics.filter((s) => s.body).length
+    expect(withBody).toBe(Phys.staticCount()) // only the live ones have a body
+    expect(withBody).toBeLessThan(city.statics.length / 5)
+    Phys.streamStatics(3000, 3000) // somewhere else inside the window
+    expect(Phys.staticCount()).toBeGreaterThan(0)
+    expect(city.statics.filter((s) => s.body).length).toBeGreaterThan(withBody) // new ones got bodies on arrival
+    // swapping to another window takes the old window's bodies out of the physics world
+    const next = World.build(2, 2, 1)
+    Phys.setStatics(next.statics, 4500, 4500)
+    const stale = city.statics.filter((s) => s.on && !next.statics.includes(s))
+    expect(stale.length).toBe(0)
+    expect(Phys.engine!.world.bodies.filter((b) => b.isStatic).length).toBe(Phys.staticCount())
+  })
+
+  it('there is no outer wall: a car can drive 20 km along a highway without hitting anything', () => {
+    World.init(777)
+    const city = World.build(0, 0, 1)
+    expect(city.walls.length).toBe(0)
+    Phys.init({ buildings: [], walls: [], statics: [] })
+    const car = new Car(PLAYER_CARS[0], 'player')
+    Phys.addCar(car)
+    car.place(0, 7, 0)
+    car.setSpeed(60)
+    const hit = vi.fn()
+    game.onImpact = hit
+    for (let i = 0; i < 360 / (1 / 60); i++) {
+      car.ctrl.throttle = 1
+      car.applyControls(1 / 60, SURF.asphalt)
+      Phys.step(1 / 60)
+      car.readBack()
+      if (i % 600 === 0) Phys.streamStatics(car.x, car.y)
+    }
+    expect(car.x).toBeGreaterThan(20000)
+    expect(hit).not.toHaveBeenCalled()
   })
 })

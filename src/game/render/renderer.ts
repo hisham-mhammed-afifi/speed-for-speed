@@ -6,7 +6,6 @@ import { FX } from './effects'
 import type { Visible } from './effects'
 import type { camera as Camera } from './camera'
 import type { Car } from '../physics/car'
-import { BRIDGES, RIVER_I } from '../world/city'
 import { Props } from '../world/props'
 import { quality } from './quality'
 import { GRASS_FILES, LOTS, TREE_FILES, treeSpecies } from '../world/worldArt'
@@ -67,9 +66,9 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
     ctx.lineWidth = 0.3
     ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
-  // the river, with bridge decks (rails on both sides) where the bridge streets cross it
-  const rv = city.river
-  if (rv.x1 >= vis.x0 && rv.x0 <= vis.x1) {
+  // the rivers, with bridge decks (rails on both sides) where the bridge streets cross them
+  for (const rv of city.rivers) {
+    if (rv.x1 < vis.x0 || rv.x0 > vis.x1 || rv.y1 < vis.y0 || rv.y0 > vis.y1) continue
     ctx.fillStyle = pat.water
     ctx.fillRect(rv.x0, rv.y0, rv.x1 - rv.x0, rv.y1 - rv.y0)
     ctx.strokeStyle = 'rgba(190,225,250,0.16)'
@@ -80,24 +79,26 @@ function drawGround(ctx: CanvasRenderingContext2D, city: City, vis: Visible): vo
       ctx.lineTo(rv.x1 - 4, y + 2.5)
       ctx.stroke()
     }
-    for (const br of city.bridges) {
-      if (br.y1 < vis.y0 || br.y0 > vis.y1) continue
-      ctx.fillStyle = pat.asphalt
-      ctx.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
-      ctx.strokeStyle = '#cfd2d8'
-      ctx.lineWidth = 0.6
-      ctx.beginPath()
-      ctx.moveTo(br.x0, br.y0 + 0.3)
-      ctx.lineTo(br.x1, br.y0 + 0.3)
-      ctx.moveTo(br.x0, br.y1 - 0.3)
-      ctx.lineTo(br.x1, br.y1 - 0.3)
-      ctx.stroke()
-    }
   }
-  // outer barrier
-  ctx.strokeStyle = '#7b7e84'
-  ctx.lineWidth = 3.5
-  ctx.strokeRect(b.minX - 1.75, b.minY - 1.75, b.maxX - b.minX + 3.5, b.maxY - b.minY + 3.5)
+  for (const br of city.bridges) {
+    if (br.y1 < vis.y0 || br.y0 > vis.y1 || br.x1 < vis.x0 || br.x0 > vis.x1) continue
+    ctx.fillStyle = pat.asphalt
+    ctx.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
+    ctx.strokeStyle = '#cfd2d8'
+    ctx.lineWidth = 0.6
+    ctx.beginPath()
+    ctx.moveTo(br.x0, br.y0 + 0.3)
+    ctx.lineTo(br.x1, br.y0 + 0.3)
+    ctx.moveTo(br.x0, br.y1 - 0.3)
+    ctx.lineTo(br.x1, br.y1 - 0.3)
+    ctx.stroke()
+  }
+  // the outer boundary wall, only for a single-tile window (the endless world has no edge)
+  if (city.walls.length) {
+    ctx.strokeStyle = '#7b7e84'
+    ctx.lineWidth = 3.5
+    ctx.strokeRect(b.minX - 1.75, b.minY - 1.75, b.maxX - b.minX + 3.5, b.maxY - b.minY + 3.5)
+  }
 }
 
 function roadLine(ctx: CanvasRenderingContext2D, horiz: boolean, pos: number, a0: number, a1: number): void {
@@ -175,7 +176,7 @@ function drawMarkings(ctx: CanvasRenderingContext2D, city: City, vis: Visible): 
       const x0 = city.vx[i] + city.vw[i] / 2 + 5,
         x1 = city.vx[i + 1] - city.vw[i + 1] / 2 - 5
       if (x1 < vis.x0 || x0 > vis.x1) continue
-      if (i === RIVER_I && !BRIDGES.includes(j)) continue // water, not road
+      if (city.waterBlocked(i, j)) continue // water, not road
       drawRoadSeg(ctx, true, y, w, city.ht[j], x0, x1)
     }
   }

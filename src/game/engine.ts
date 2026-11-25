@@ -12,13 +12,14 @@ import { Car } from './physics/car'
 import { Phys } from './physics/world'
 import { camera } from './render/camera'
 import { FX } from './render/effects'
-import { drawHudCanvas, initHudMap } from './render/hudCanvas'
+import { drawHudCanvas } from './render/hudCanvas'
 import { Renderer } from './render/renderer'
 import { loadSave, writeSave } from './save'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
-import { createCity, LANE_OFFSET } from './world/city'
+import { LANE_OFFSET, TILE } from './world/city'
+import { World } from './world/world'
 import { Traffic } from './world/traffic'
 import { Difficulty } from './ai/difficulty'
 import { quality } from './render/quality'
@@ -44,6 +45,11 @@ class GameEngine {
   private districtT = 0
   private propT = 0
   private streamT = 0
+  /** tile the world window is centred on, and a timer for checking whether to move it */
+  private cx = 0
+  private cy = 0
+  private worldT = 0
+  private lastTile = ''
   /** frames drawn since the game froze (pause / result screens): the picture no longer changes, so stop redrawing it */
   private idleFrames = 0
   private lastDistrict: District | null = null
@@ -82,9 +88,10 @@ class GameEngine {
 
     this.assets ??= loadImages([...ALL_CAR_FILES, ...WORLD_FILES], (p) => store().setLoadProgress(p)).then(() => {
       if (this.ctx) Renderer.initArt(this.ctx)
-      game.city = createCity()
+      World.init()
+      this.cx = this.cy = 0
+      game.city = World.build(0, 0, 1) // the endless world, seen through a 3 x 3 tile window around the player
       Phys.init(game.city)
-      initHudMap(game.city)
     })
     void this.assets.then(() => {
       if (detached) return
@@ -216,8 +223,9 @@ class GameEngine {
     Phys.reset()
     FX.clearSkids()
     heat.reset()
+    if (this.cx !== 0 || this.cy !== 0) this.setWindow(0, 0) // every run starts in the home tile
     const city = game.city
-    const n = city.nodeId(8, 8),
+    const n = city.centerNode(),
       nb = city.neighbors(n)
     const to = nb[0]
     const p = city.lanePoint(n, to, 0.5)
@@ -227,6 +235,7 @@ class GameEngine {
     if (Phys.streaming) Phys.streamStatics(p.x, p.y)
     game.time = 0
     this.lastDistrict = null
+    this.lastTile = ''
     this.districtT = 0
     store().clearToasts()
     camera.snap()
@@ -378,10 +387,91 @@ class GameEngine {
     camera.snap()
   }
 
+  /** Put the world window around tile (cx, cy) with nothing on the road (a fresh run). */
+  private setWindow(cx: number, cy: number): void {
+    game.city = World.build(cx, cy, 1)
+    this.cx = cx
+    this.cy = cy
+    Phys.setStatics(game.city.statics, 0, 0)
+  }
+
+  /**
+   * The player has moved into another tile: rebuild the window around it. Tiles are cached, so this is cheap. Node ids are
+   * window-relative, so every car's route is shifted to the new window (or the car dropped if it falls outside, which
+   * only happens to cars far from the player that would despawn anyway).
+   */
+  private recenter(ncx: number, ncy: number): void {
+    const old = game.city
+    const next = World.build(ncx, ncy, 1)
+    const di = (old.tx0 - next.tx0) * TILE,
+      dj = (old.ty0 - next.ty0) * TILE
+    const map = (id: number): number => {
+      if (id < 0) return id
+      const i = (id % old.NV) + di,
+        j = ((id / old.NV) | 0) + dj
+      return i < 0 || j < 0 || i >= next.NV || j >= next.NH ? -2 : j * next.NV + i
+    }
+    for (let k = game.civs.length - 1; k >= 0; k--) {
+      const u = game.civs[k],
+        d = u.driver
+      const a = map(d.a),
+        b = map(d.b)
+      if (a < 0 || b < 0) {
+        game.removeCar(u.car)
+        game.civs.splice(k, 1)
+        continue
+      }
+      d.a = a
+      d.b = b
+      if (d.next >= 0) d.next = Math.max(-1, map(d.next))
+      d.city = next
+    }
+    for (let k = game.cops.length - 1; k >= 0; k--) {
+      const u = game.cops[k],
+        d = u.driver
+      if (d) {
+        const a = map(d.a),
+          b = map(d.b)
+        if (a < 0 || b < 0) {
+          game.removeCar(u.car)
+          game.cops.splice(k, 1)
+          continue
+        }
+        d.a = a
+        d.b = b
+        if (d.next >= 0) d.next = Math.max(-1, map(d.next))
+        d.city = next
+      }
+      u.path = null // routes are re-planned in the new window
+      u.goal = undefined
+      if (u.state === 'intercept') {
+        u.state = 'pursue'
+        u.ic = null
+        u.icArrived = false
+        u.icCool = 10
+      }
+    }
+    game.city = next
+    this.cx = ncx
+    this.cy = ncy
+    const pl = game.player.car
+    Phys.setStatics(next.statics, pl.x, pl.y)
+  }
+
   // ---------------------------------------------------------------- main update (fixed 120 Hz)
   update(dt: number): void {
     if (game.state !== 'play') return
     game.time += dt
+    // the endless world: keep the window around the player, and generate tiles ahead of them
+    this.worldT += dt
+    if (this.worldT >= 0.25) {
+      this.worldT = 0
+      const p = game.player.car
+      const [ncx, ncy] = World.centerFor(p.x, p.y, this.cx, this.cy)
+      if (ncx !== this.cx || ncy !== this.cy) this.recenter(ncx, ncy)
+      World.prefetch(p.x, p.y, this.cx, this.cy)
+      World.pump()
+    }
     const pl = game.player.car,
       city = game.city
     const ctl = input.poll(dt)
@@ -423,6 +513,11 @@ class GameEngine {
     this.districtT += dt
     if (this.districtT >= 0.5) {
       this.districtT = 0
+      const tile = city.tileAt(pl.x, pl.y)
+      if (tile && tile.name !== this.lastTile) {
+        if (this.lastTile) game.toast(tile.name, '#ffd23f')
+        this.lastTile = tile.name
+      }
       const d = city.districtAt(pl.x, pl.y)
       if (d !== this.lastDistrict) {
         if (this.lastDistrict !== null) game.toast('Entering: ' + DISTRICT_NAMES[d], '#9ec5ff')

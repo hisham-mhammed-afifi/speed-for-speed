@@ -53,14 +53,20 @@ src/
     core/                    math, input (keyboard/gamepad/touch), loop, assets, viewport
     data/cars.ts             car specs + car-select stats
     physics/                 car.ts (arcade car on a Matter body), world.ts (Matter engine, impacts)
-    world/                   city.ts (procedural city: districts, highway ring, river, tunnels, jumps, road graph), traffic.ts (lane drivers), carGrid.ts (spatial grid), props.ts (smashable props)
+    world/                   city.ts (types, road widths), layout.ts (road lines per tile column/row), tile.ts (one tile: districts, buildings, river, tunnels, jumps), world.ts (the endless world: tile cache and the 3x3 window), traffic.ts (lane drivers), carGrid.ts (spatial grid), props.ts (smashable props)
     ai/                      pathfind (A*), drive, police units, heat (pursuit, roadblocks, spikes, helicopter)
     render/                  camera, effects (particles, skid marks), renderer (world), hudCanvas (speedo, minimap)
 public/cars/                 car sprites
 ```
 
-The city has three districts (downtown towers, an industrial port with container yards, suburbs with houses and lawns) picked by a seeded
-Voronoi map, ringed by a fast three-lane highway that is walled off with concrete barriers except at a few ramps.
+The world is endless. It is an infinite grid of tiles (16 x 16 blocks, about 1.8 km), each generated on demand from `hash(seed, tx, ty)` so the
+same place always looks the same. Every tile has its own mix of three districts (downtown towers, an industrial port with container yards,
+suburbs with houses and lawns), its own name, and about four in ten have a river with three bridges. Tiles are separated by fast three-lane
+highways (28 m wide) that form a grid across the whole world; they are walled with concrete barriers except at ramps, and cross each other in
+open interchanges. The game never sees more than a 3 x 3 tile window around the player (`World.build`): when you are 100 m into the next
+tile the window is rebuilt around it (`engine.recenter`, about 5-10 ms, with the tiles ahead pre-generated while you approach), node ids of every
+car's route are shifted to the new window, and static colliders are streamed in lazily. There are no boundary walls; `createCity()` still builds a
+single walled tile for the headless tests.
 
 Living map features: a river that splits the city (crossed only at three bridges), tunnels under buildings that hide you from cops
 and the helicopter, launch ramps (go fast enough and you fly; cops can't follow through the air), and construction zones with loose

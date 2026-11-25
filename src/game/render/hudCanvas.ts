@@ -7,53 +7,49 @@ import { game } from '../state'
 import { FX } from './effects'
 import { Renderer } from './renderer'
 import type { camera as Camera } from './camera'
-import type { City } from '../world/city'
+import type { Tile } from '../world/city'
 
 // Per-frame HUD pieces that are drawn on the game canvas: speedometer, minimap, phone speed panel, debug text.
 // Static text (heat stars, bounty, toasts, hints) lives in React (src/ui/hud/HudOverlay.tsx).
 
-const MAP_SCALE = 0.5
-let map: HTMLCanvasElement | null = null
-let bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+const MAP_SCALE = 0.3
 let fps = 60
 
-/** Pre-render the whole city once for the minimap. */
-export function initHudMap(city: City): void {
-  const b = city.bounds
+/** The minimap picture of one tile (blocks tinted by district, buildings, water, bridges, tunnels, highways), made the first time it is drawn. */
+function tileMap(t: Tile): HTMLCanvasElement {
+  if (t.map) return t.map
   const k = MAP_SCALE
-  const w = Math.ceil((b.maxX - b.minX) * k),
-    h = Math.ceil((b.maxY - b.minY) * k)
   const cv = document.createElement('canvas')
-  cv.width = w
-  cv.height = h
+  cv.width = Math.ceil((t.x1 - t.x0) * k)
+  cv.height = Math.ceil((t.y1 - t.y0) * k)
   const x = cv.getContext('2d')!
   x.fillStyle = '#4a4f58'
-  x.fillRect(0, 0, w, h)
+  x.fillRect(0, 0, cv.width, cv.height)
   x.scale(k, k)
-  x.translate(-b.minX, -b.minY)
+  x.translate(-t.x0, -t.y0)
   // a tint per district so you can tell where you are at a glance
   const tint = { downtown: '#222833', port: '#2d2a25', suburbs: '#24302a' } as const
-  for (const bl of city.blocks) {
+  for (const bl of t.blocks) {
     x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
-  for (const bd of city.buildings) {
+  for (const bd of t.buildings) {
     x.fillStyle = bd.kind === 'container' ? '#3b2f2b' : bd.kind === 'house' ? '#2f3a30' : bd.kind === 'tower' ? '#1c2029' : '#26231f'
     x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)
   }
   // the river, its bridges and the tunnels (a dark line so you can plan an escape route)
   x.fillStyle = '#1f4e7a'
-  x.fillRect(city.river.x0, city.river.y0, city.river.x1 - city.river.x0, city.river.y1 - city.river.y0)
+  for (const r of t.rivers) x.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0)
   x.fillStyle = '#4a4f58'
-  for (const br of city.bridges) x.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
+  for (const br of t.bridges) x.fillRect(br.x0, br.y0, br.x1 - br.x0, br.y1 - br.y0)
   x.fillStyle = '#0c0d10'
-  for (const t of city.tunnels) x.fillRect(t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0)
-  // the highway ring in amber
+  for (const tn of t.tunnels) x.fillRect(tn.x0, tn.y0, tn.x1 - tn.x0, tn.y1 - tn.y0)
+  // the four highways around the tile, in amber
   x.fillStyle = '#7a6a3a'
-  for (const i of [0, city.NV - 1]) x.fillRect(city.vx[i] - city.vw[i] / 2, b.minY, city.vw[i], b.maxY - b.minY)
-  for (const j of [0, city.NH - 1]) x.fillRect(b.minX, city.hy[j] - city.hw[j] / 2, b.maxX - b.minX, city.hw[j])
-  map = cv
-  bounds = b
+  for (const i of [0, 16]) x.fillRect(t.V.pos[i] - t.V.wid[i] / 2, t.y0, t.V.wid[i], t.y1 - t.y0)
+  for (const j of [0, 16]) x.fillRect(t.x0, t.H.pos[j] - t.H.wid[j] / 2, t.x1 - t.x0, t.H.wid[j])
+  t.map = cv
+  return cv
 }
 
 function arc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, a0: number, a1: number, lw: number, col: string): void {
@@ -277,8 +273,10 @@ function miniContent(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: n
   ctx.rotate(cam.angle)
   ctx.scale(k, k)
   ctx.translate(-pl.x, -pl.y)
-  const b = bounds
-  if (map) ctx.drawImage(map, b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY)
+  for (const t of game.city.tiles) {
+    if (t.x1 < pl.x - 320 || t.x0 > pl.x + 320 || t.y1 < pl.y - 320 || t.y0 > pl.y + 320) continue // not in the minimap's range
+    ctx.drawImage(tileMap(t), t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0)
+  }
   const dot = (x: number, y: number, rad: number, col: string) => {
     ctx.fillStyle = col
     ctx.beginPath()

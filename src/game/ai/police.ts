@@ -109,7 +109,7 @@ export const Police = {
     const city = game.city,
       pl = game.player.car
     for (let tries = 0; tries < 10; tries++) {
-      const n = city.randomNode()
+      const n = city.randomNodeNear(pl.x, pl.y, 180, 420)
       const d = Math.hypot(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
       if (d < 180 || d > 420) continue
       // fewer patrols out in the suburbs, plenty downtown and on the highway
@@ -302,8 +302,7 @@ export const Police = {
             u.goal = city.nearestNode(t.x, t.y)
             H.noteMemory(t.x, t.y)
           } else {
-            const g = city.randomNode()
-            if (Math.hypot(city.nodeX(g) - H.lastX, city.nodeY(g) - H.lastY) < 280) u.goal = g
+            u.goal = city.randomNodeNear(H.lastX, H.lastY, 0, 280)
           }
           u.repath = 0
         }

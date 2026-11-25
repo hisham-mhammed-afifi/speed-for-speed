@@ -1,7 +1,7 @@
 import Matter from 'matter-js'
 import { game } from '../state'
 import type { Car } from './car'
-import type { Building, PropSpot, Wall } from '../types'
+import type { Building, PropSpot, StaticRec, Wall } from '../types'
 
 const { Engine, Bodies, Body, Composite, Events } = Matter
 
@@ -23,15 +23,17 @@ interface PairCollision {
 
 const vel = { x: 0, y: 0 }
 
-/** A static collider and where it is (axis-aligned, metres), so it can be streamed in and out of the world. */
-interface StaticRec {
-  body: Matter.Body
-  cx: number
-  cy: number
-  hx: number
-  hy: number
-  always: boolean
-  on: boolean
+/** The Matter body for a static collider, made the first time it is needed (a whole tile of them costs nothing until you get there). */
+function staticBody(r: StaticRec): Matter.Body {
+  if (!r.body)
+    r.body = Bodies.rectangle(r.cx * S, r.cy * S, r.hx * 2 * S, r.hy * 2 * S, {
+      isStatic: true,
+      friction: 0.3,
+      restitution: 0.15,
+      label: 'static',
+      collisionFilter: { category: CAT_STATIC, mask: 0xffff },
+    })
+  return r.body as Matter.Body
 }
 
 /** Static colliders within this many metres of the player are live. Traffic despawns at 420 m, pursuers at 420-700 m. */
@@ -45,7 +47,7 @@ export const Phys = {
   /** every static collider in the city; only those near the player are actually in the Matter world (see streamStatics) */
   statics: [] as StaticRec[],
 
-  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[]; waterWalls?: Wall[] }, stream = true): void {
+  init(city: { buildings: Building[]; walls: Wall[]; barriers?: Wall[]; waterWalls?: Wall[]; statics?: StaticRec[] }, stream = true): void {
     // Matter's default solver iterations (6 / 4) are plenty for arcade cars and noticeably cheaper than 8 / 6
     const engine = Engine.create({ positionIterations: 6, velocityIterations: 4, enableSleeping: false })
     engine.gravity.x = 0
@@ -53,31 +55,39 @@ export const Phys = {
     engine.gravity.scale = 0
     Phys.engine = engine
     Phys.cars = []
-    const recs: StaticRec[] = []
-    const add = (cx: number, cy: number, hx: number, hy: number, always: boolean) =>
-      recs.push({
-        body: Bodies.rectangle(cx * S, cy * S, hx * 2 * S, hy * 2 * S, {
-          isStatic: true,
-          friction: 0.3,
-          restitution: 0.15,
-          label: 'static',
-          collisionFilter: { category: CAT_STATIC, mask: 0xffff },
-        }),
-        cx,
-        cy,
-        hx,
-        hy,
-        always,
-        on: false,
-      })
-    for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy, false)
-    for (const w of city.walls) add(w.x, w.y, w.hx, w.hy, true) // the four boundary walls: always there
-    for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy, false)
-    for (const w of city.waterWalls ?? []) add(w.x, w.y, w.hx, w.hy, false)
-    Phys.statics = recs
+    if (city.statics) Phys.statics = city.statics
+    else {
+      const recs: StaticRec[] = []
+      const add = (cx: number, cy: number, hx: number, hy: number, always: boolean) => recs.push({ body: null, cx, cy, hx, hy, always, on: false })
+      for (const b of city.buildings) add(b.x, b.y, b.hx, b.hy, false)
+      for (const w of city.walls) add(w.x, w.y, w.hx, w.hy, true) // the boundary walls: always there
+      for (const w of city.barriers ?? []) add(w.x, w.y, w.hx, w.hy, false)
+      for (const w of city.waterWalls ?? []) add(w.x, w.y, w.hx, w.hy, false)
+      Phys.statics = recs
+    }
+    // records may be shared with an earlier world (tile data is cached): none of their bodies are in this fresh engine
+    for (const r of Phys.statics) r.on = false
     Phys.streaming = stream
     Events.on(engine, 'collisionStart', onCollisionStart)
     Phys.streamStatics(0, 0, stream ? Phys.radius : Infinity)
+  },
+
+  /**
+   * The window moved: swap in the new list of colliders. Those that left the window come out of the physics world; the new
+   * ones come in as streamStatics reaches them (their bodies are created then).
+   */
+  setStatics(next: StaticRec[], x: number, y: number): void {
+    const world = Phys.engine?.world
+    const keep = new Set(next)
+    const out: Matter.Body[] = []
+    for (const r of Phys.statics)
+      if (!keep.has(r) && r.on) {
+        r.on = false
+        if (r.body) out.push(r.body as Matter.Body)
+      }
+    if (world && out.length) Composite.remove(world, out)
+    Phys.statics = next
+    Phys.streamStatics(x, y)
   },
 
   /** false in tests that want every static collider in the world at all times */
@@ -103,10 +113,10 @@ export const Phys = {
       const d = Math.hypot(dx, dy)
       if (!s.on && (s.always || d <= R)) {
         s.on = true
-        add.push(s.body)
+        add.push(staticBody(s))
       } else if (s.on && !s.always && d > R + 80) {
         s.on = false
-        remove.push(s.body)
+        remove.push(s.body as Matter.Body)
       }
     }
     if (add.length) Composite.add(world, add)

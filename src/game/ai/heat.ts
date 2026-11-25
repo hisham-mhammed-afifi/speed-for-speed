@@ -282,7 +282,7 @@ export class HeatManager {
       pl = game.player.car
     let pick: number | null = null
     for (let tries = 0; tries < 20; tries++) {
-      const n = city.randomNode()
+      const n = city.randomNodeNear(pl.x, pl.y, Difficulty.k.spawnMin, Difficulty.k.spawnMax)
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
       const d = Math.hypot(nx - pl.x, ny - pl.y)

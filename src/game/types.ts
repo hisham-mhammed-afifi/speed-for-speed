@@ -199,3 +199,18 @@ export interface PropSpot {
   angle: number
   gone: boolean
 }
+
+/**
+ * A static collider (building, barrier, water strip). Its Matter body is created the first time it comes within range of
+ * the player (physics/world.ts), so a whole tile of colliders costs nothing until you get there.
+ */
+export interface StaticRec {
+  body: unknown
+  cx: number
+  cy: number
+  hx: number
+  hy: number
+  /** never streamed out (the outer boundary walls of a single-tile window) */
+  always: boolean
+  on: boolean
+}

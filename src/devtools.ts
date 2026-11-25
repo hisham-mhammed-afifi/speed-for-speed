@@ -11,6 +11,7 @@ import { camera } from './game/render/camera'
 import { Renderer } from './game/render/renderer'
 import { game } from './game/state'
 import { Props } from './game/world/props'
+import { World } from './game/world/world'
 import { useGameStore } from './store'
 
 /**
@@ -35,6 +36,7 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     camera,
     Renderer,
     Props,
+    World,
     Tactics,
     Memory,
     quality,
