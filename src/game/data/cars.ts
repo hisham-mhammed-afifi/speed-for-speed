@@ -125,10 +125,10 @@ export function carBars(spec: CarSpec) {
   return {
     topKmh: Math.round(e.top * 3.6),
     t100: e.t100,
-    speed: (e.top - 45) / 28,
+    speed: (e.top - 30) / 45, // 108 km/h (empty) .. 290 km/h (full): the road bikes and cars both read sensibly
     accel: (7.5 - e.t100) / 4,
     handling: (spec.grip - 9.5) / 3, // grip is 10..12.5 across the roster
-    durability: (spec.durability - 0.7) / 0.9,
-    weight: (spec.mass - 1400) / 900,
+    durability: (spec.durability - 0.3) / 1.3,
+    weight: (spec.mass - 250) / 2000,
   }
 }

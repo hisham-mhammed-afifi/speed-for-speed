@@ -56,11 +56,12 @@ export function CarSelect() {
 
   return (
     <div className="screen">
-      <div className="panel wide">
+      <div className="panel wide garage">
         <div className="garage-head">
           <h2>Garage</h2>
           <div className="wallet">{money(save.cash)}</div>
         </div>
+        <div className="garage-body">
         <div className="carousel">
           <button className="arrow" onClick={() => step(-1)} aria-label="Previous car">
             &#8249;
@@ -128,6 +129,7 @@ export function CarSelect() {
         )}
 
         <WantedBar rating={skill ?? 0.4} />
+        </div>
         <div className="menu row">
           <button onClick={() => setScreen('title')}>Back</button>
           <button className="primary" onClick={drive} disabled={!owned}>

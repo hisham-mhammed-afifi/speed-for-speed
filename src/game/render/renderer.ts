@@ -389,6 +389,7 @@ function drawMarkings(
           const xx = x + sgn * (vw / 2 + 1.6) - 1.1;
           if ((i === 0 && sgn < 0) || (i === city.NV - 1 && sgn > 0)) continue;
           if (city.isDead(node + sgn)) continue;
+          if (city.waterBlocked(sgn > 0 ? i : i - 1, j)) continue; // this street ends in the river
           for (let k = y - hw / 2 + 1; k < y + hw / 2 - 1; k += 1.15)
             ctx.rect(xx, k, 2.2, 0.6);
         }
@@ -775,13 +776,13 @@ function drawCorner(ctx: CanvasRenderingContext2D, c: NonNullable<Block["corner"
   ctx.strokeRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
 }
 
-/** a rocky hill: stacked, shrinking, lighter layers of the mountain texture, leaning with the camera like a building roof */
+/** a rocky hill: a jagged outline, stacked terraces getting lighter and smaller towards the top (leaning with the camera like a roof), with the mountain texture as grain */
 function drawRock(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
   const seed = b.art ?? 0;
-  const N = 12;
+  const N = 18;
   const rad = (i: number) => {
     const v = Math.sin((seed + i * 7.31) * 12.9898) * 43758.5453;
-    return 0.78 + 0.22 * (v - Math.floor(v)); // 0.78 .. 1 of the collider, so it never spills out of it
+    return 0.6 + 0.4 * (v - Math.floor(v)); // 0.6 .. 1 of the collider, so it never spills out of it
   };
   const path = (scale: number, ox: number, oy: number) => {
     ctx.beginPath();
@@ -800,17 +801,20 @@ function drawRock(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera
     sy = (b.y - cam.y) * k;
   const s = b.height * 0.25;
   path(1, s * 0.6, s * 0.6); // the shadow, thrown away from the light
-  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fillStyle = "rgba(0,0,0,0.24)";
   ctx.fill();
-  for (let layer = 0; layer < 4; layer++) {
-    const f = layer / 3;
-    path(1 - f * 0.3, sx * f, sy * f);
+  const TONES = ["#4f4a43", "#665f56", "#7d756a", "#948b7e", "#aaa191"];
+  for (let layer = 0; layer < TONES.length; layer++) {
+    const f = layer / (TONES.length - 1);
+    path(1 - f * 0.62, sx * f, sy * f);
+    ctx.fillStyle = TONES[layer];
+    ctx.fill();
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = pat.rock;
     ctx.fill();
-    ctx.fillStyle = layer === 0 ? "rgba(20,18,16,0.38)" : `rgba(255,255,255,${0.04 + f * 0.1})`;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.4)";
-    ctx.lineWidth = 0.3;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = layer === 0 ? "rgba(0,0,0,0.45)" : "rgba(30,25,20,0.3)";
+    ctx.lineWidth = 0.25;
     ctx.stroke();
   }
 }
@@ -855,24 +859,25 @@ function drawStatue(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Came
   const lift = (h: number) => ({ x: (cx - cam.x) * 0.0012 * h, y: (cy - cam.y) * 0.0012 * h });
   const lp = lift(3.4);
   ctx.fillStyle = "#6a6d75";
-  ctx.fillRect(cx - 1.8, cy - 1.8, 3.6, 3.6);
+  ctx.fillRect(cx - 2.3, cy - 2.3, 4.6, 4.6);
   ctx.fillStyle = "#a4a7ae";
-  ctx.fillRect(cx - 1.8 + lp.x, cy - 1.8 + lp.y, 3.6, 3.6);
+  ctx.fillRect(cx - 2.3 + lp.x, cy - 2.3 + lp.y, 4.6, 4.6);
   ctx.strokeStyle = "rgba(0,0,0,0.45)";
   ctx.lineWidth = 0.2;
-  ctx.strokeRect(cx - 1.8 + lp.x, cy - 1.8 + lp.y, 3.6, 3.6);
+  ctx.strokeRect(cx - 2.3 + lp.x, cy - 2.3 + lp.y, 4.6, 4.6);
   // the statue on top
   const sp = lift(9);
   const px = cx + sp.x,
     py = cy + sp.y;
   const im = STATUE_FILES[k] ? images[STATUE_FILES[k]] : undefined;
   if (im) {
-    ctx.drawImage(im, px - 2.7, py - 2.7, 5.4, 5.4);
+    ctx.drawImage(im, px - 3.8, py - 3.8, 7.6, 7.6);
     return;
   }
   // placeholder: a bronze figure with outstretched arms, an obelisk or a globe, depending on which statue it is
   ctx.save();
   ctx.translate(px, py);
+  ctx.scale(1.8, 1.8); // the drawn placeholder fills the pedestal
   const shade = (a: number) => `rgba(120,80,30,${a})`;
   if (k % 3 === 0) {
     ctx.rotate(0.5);

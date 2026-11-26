@@ -75,7 +75,7 @@ export const Combo = {
       if (this.bestMult < 3 && this.mult >= 3) this.sinks.stat('mult3', 1) // once per run
       this.bestMult = this.mult
     }
-    game.toast(amount > 0 ? `${label}  +$${amount}  x${fmt(m)}` : label, '#7be0ff')
+    game.toast(amount > 0 ? `${label}  +$${amount}  x${fmt(this.mult)}` : label, '#7be0ff')
   },
 
   /** Pay out what is pending. */

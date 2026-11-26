@@ -238,7 +238,7 @@ export class Car {
       (slip - 0.12) * 4,
       this.sliding ? 0.6 : 0,
       hb > 0.3 && sp > 6 ? 0.9 : 0,
-      wheelspin * 0.8,
+      this.kind === 'civil' ? 0 : wheelspin * 0.8, // ordinary traffic pulling away from a stop leaves no marks
       brake > 0.85 && sp > 12 ? 0.4 : 0,
     )
     if (surf.kind !== 'asphalt') sk *= 0.4

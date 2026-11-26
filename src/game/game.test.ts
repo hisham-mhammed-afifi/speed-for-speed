@@ -17,6 +17,7 @@ import {
 } from "./world/worldArt";
 import {
   ALL_CAR_FILES,
+  carBars,
   estimate,
   PLAYER_CARS,
   POLICE_SPEC,
@@ -2737,5 +2738,58 @@ describe("damage rules for the player (physics/damage.ts)", () => {
 
   it("a combo survives a scrape", () => {
     expect(COMBO_BREAK_DV).toBeGreaterThan(LIGHT_BUMP_DV);
+  });
+});
+
+describe("polish fixes from the visual test", () => {
+  it("the garage stat bars read sensibly for every vehicle, slow bikes and heavy SUVs included", () => {
+    for (const c of PLAYER_CARS) {
+      const b = carBars(c);
+      expect(b.speed).toBeGreaterThan(0.2); // a 165 km/h dirt bike is not an empty bar
+      expect(b.durability).toBeGreaterThan(0.1);
+      expect(b.weight).toBeGreaterThan(0);
+      expect(b.weight).toBeLessThan(1.01);
+    }
+    const dirt = carBars(PLAYER_CARS.find((c) => c.id === "dirt")!),
+      suv = carBars(PLAYER_CARS.find((c) => c.id === "blacksuv")!);
+    expect(dirt.weight).toBeLessThan(suv.weight);
+    expect(suv.speed).toBeGreaterThan(dirt.speed);
+  });
+
+  it("traffic pulling away from a stop leaves no tyre marks, but the player still does", () => {
+    Phys.init({ buildings: [], walls: [] });
+    const launch = (kind: "civil" | "player") => {
+      Phys.reset();
+      const car = new Car(PLAYER_CARS[0], kind);
+      Phys.addCar(car);
+      car.place(0, 0, 0);
+      car.ctrl.throttle = 1;
+      let worst = 0;
+      for (let i = 0; i < 2 / DT; i++) {
+        car.applyControls(DT, SURF.asphalt);
+        Phys.step(DT);
+        car.readBack();
+        worst = Math.max(worst, car.skid);
+      }
+      return worst;
+    };
+    expect(launch("civil")).toBeLessThan(0.12);
+    expect(launch("player")).toBeGreaterThan(0.12);
+  });
+
+  it("the combo message shows the multiplier the counter shows", () => {
+    const texts: string[] = [];
+    const real = game.toast;
+    game.toast = (t) => texts.push(t);
+    Combo.reset();
+    Combo.sinks = { cash: () => {}, stat: () => {} };
+    Combo.add(60, "NEAR MISS");
+    Combo.add(60, "NEAR MISS");
+    game.toast = real;
+    expect(texts[0]).toContain("+$60");
+    expect(texts[0]).toContain("x1.25");
+    expect(texts[1]).toContain("+$75"); // 60 x 1.25
+    expect(texts[1]).toContain("x1.5");
+    expect(Combo.mult).toBe(1.5);
   });
 });

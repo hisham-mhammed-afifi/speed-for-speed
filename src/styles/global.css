@@ -143,7 +143,7 @@ p { margin: 0; line-height: 1.5; max-width: 62ch; }
 .wallet { font-size: 26px; font-weight: 800; color: #7be08a; }
 .preview { position: relative; }
 .preview.locked img { filter: grayscale(1) brightness(0.55) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.6)); }
-.lock-tag { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 3px 12px; font-weight: 800; color: #ffd23f; }
+.lock-tag { position: absolute; top: 6px; right: 8px; background: rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 3px 12px; font-weight: 800; color: #ffd23f; }
 .upgrades { display: flex; flex-direction: column; gap: 6px; }
 .upgrade { display: grid; grid-template-columns: 90px 1fr 96px; align-items: center; gap: 10px; font-size: 14px; }
 .up-name { color: rgba(238, 242, 247, 0.8); }
@@ -188,4 +188,26 @@ button.primary:disabled:hover { background: linear-gradient(180deg, #ff4a4a, #c9
   .screen { gap: 8px; }
   .menu { min-width: 220px; gap: 6px; }
   .menu button { padding: 8px 18px; }
+}
+
+/* the garage is one fixed-size panel: the list scrolls, Drive and Back never leave the screen, and the panel does not jump between cars */
+.screen .panel.garage { height: min(720px, calc(100vh - 32px)); height: min(720px, calc(100dvh - 32px)); overflow: hidden; }
+.garage-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; touch-action: pan-y; }
+.garage-body::-webkit-scrollbar { width: 6px; }
+.garage-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 3px; }
+.panel.garage > .menu.row { flex: none; }
+@media (max-height: 820px) {
+  .panel.garage .preview { height: 130px; }
+  .panel.garage .preview img { max-height: 112px; }
+  .panel.garage { gap: 10px; }
+  .garage-body { gap: 10px; }
+}
+@media (max-height: 460px) {
+  .upgrades { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; }
+  .upgrade { grid-template-columns: 62px 1fr 78px; font-size: 12px; }
+  .pips i { width: 20px; height: 8px; }
+  .panel.garage .preview { height: 76px; }
+  .panel.garage .preview img { max-height: 70px; }
+  .panel.garage .wanted { display: none; }
+  .lock-tag { font-size: 12px; padding: 1px 8px; }
 }
