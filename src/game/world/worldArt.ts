@@ -8,11 +8,11 @@ export const TREE_FILES = Array.from({ length: 8 }, (_, i) => `world/trees/t${i}
 export const GRASS_FILES = { lawn: 'world/grass/lawn.webp', meadow: 'world/grass/meadow.webp' } as const
 /** the sea (river water and fountains), the sand (banks and sandy lots) and the rock (hills) */
 export const TEXTURE_FILES = { sea: 'world/textures/sea.webp', sand: 'world/textures/sand.webp', rock: 'world/textures/rock.webp' } as const
-/**
- * Top-down statue pictures for the three statue squares (world/statues/s1..s3.webp, made by `build-assets.mjs --only statues` from statue-1..3.jpg).
- * Empty until the pictures exist: the squares then show a drawn placeholder. Add 'world/statues/s1.webp', ... here once the files are in public/.
- */
-export const STATUE_FILES: string[] = []
+/** The two monuments on the statue squares' islands (made by `build-assets.mjs --only statues` from statues.jpg and fountain.jpg): round, seen from above. */
+export const MONUMENT_FILES = { statue: 'world/statues/statue.webp', fountain: 'world/statues/fountain.webp' } as const
+export type Monument = keyof typeof MONUMENT_FILES
+/** The three squares of a town take turns: statue, fountain, statue. */
+export const monumentFor = (k: number): Monument => (k % 2 === 1 ? 'fountain' : 'statue')
 
 /** Which tree sprite a tree uses, from its random value c (0..1): mostly greens, some blossom trees. */
 export function treeSpecies(c: number): number {
@@ -100,7 +100,7 @@ export const WORLD_FILES: string[] = [
   GRASS_FILES.lawn,
   GRASS_FILES.meadow,
   ...Object.values(TEXTURE_FILES),
-  ...STATUE_FILES,
+  ...Object.values(MONUMENT_FILES),
   ...Object.values(LOTS).map((l) => l.file),
 ]
 

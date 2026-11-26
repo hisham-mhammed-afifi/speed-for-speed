@@ -2528,7 +2528,7 @@ describe("squares, sand and rocks", () => {
         expect(q.ro).toBeGreaterThan(q.ri);
         const statues = t.buildings.filter(
           (b) =>
-            b.kind === "statue" && Math.hypot(b.x - q.cx, b.y - q.cy) < 0.01,
+            b.kind === "statue" && !b.hidden && Math.hypot(b.x - q.cx, b.y - q.cy) < 0.01,
         );
         expect(statues).toHaveLength(1);
         expect(statues[0].art).toBe(q.k);

@@ -188,9 +188,11 @@ Three photo textures (`public/world/textures/`: sea, sand, rock) are made seamle
   paved and carries a stone fountain basin (moving water), a pedestal and the statue (a `'statue'` building, a collider inside the island). The four blocks
   around the crossing each get a 24 m paved plaza corner (`Block.corner`) with a tree, and no buildings on it (`rest` strips take over the rest of the block).
   Squares are at least 3 crossings apart and never beside a bend, a roundabout, the river, an alley or a highway.
-  Until the artist's pictures exist the statue is a drawn bronze figure, obelisk or globe. To use pictures: drop `statue-1.jpg` .. `statue-3.jpg`
-  (top view, white background) in the art folder, run `--only statues`, and list the three `world/statues/sN.webp` files in `STATUE_FILES`
-  (`world/worldArt.ts`).
+  The island holds the artist's round pictures (`public/world/statues/statue.webp` and `fountain.webp`, cut out of `statues.jpg` and `fountain.jpg` with
+  `node scripts/build-assets.mjs "<folder>" --only statues`, which finds the white-on-white disc instead of flood-filling): the three squares of a town
+  take turns, statue, fountain, statue (`monumentFor` in `world/worldArt.ts`), and the picture fills the island (`drawMonument`; the fountain's water gets
+  faint ripples). The collider is the centre box plus two hidden boxes (`Building.hidden`) forming a cross out to the island's edge, all inside the island.
+  If a picture fails to load, a drawn basin, pedestal and bronze figure stand in (`drawStatuePlaceholder`).
   Cops steer round the island, not over it (`ringAim`, `ringSpeed` in `ai/police.ts`: they brake for the ring and take it the shorter way).
 - All of this is generated on its own random stream (`seed ^ 0x5a1e5`), so the rest of a town doesn't depend on it.
 

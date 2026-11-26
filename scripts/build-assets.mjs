@@ -9,7 +9,7 @@
 //  - trucks: white-truck / silver-truck / container-truck .jpg (top views), cut out, turned to face left, 768 px WebP -> public/trucks/
 //
 //  - textures: sea-water / desert-sand / mountains .jpg, made seamless, 512 px WebP -> public/world/textures/ (sea, sand, rock)
-//  - statues:  statue-1..3.jpg (top views, optional), background cut out, 384 px WebP -> public/world/statues/ (s1..s3)
+//  - statues:  statues.jpg and fountain.jpg (round monuments seen from above on white), cut out with a circle, 512 px WebP -> public/world/statues/ (statue, fountain)
 //
 // `--only bikes`, `--only trucks`, `--only textures` or `--only statues` builds just those (the tree, grass and lot sources are not needed then):
 //   node scripts/build-assets.mjs "<folder>" --only trucks
@@ -279,15 +279,64 @@ if (!only || only === 'textures') {
   }
 }
 
-// statue pictures (top views on a white background), added by the artist when they exist: statue-1.jpg .. statue-3.jpg
+// the monuments for the statue squares. Both are round and made of white marble on a white page, so a flood-fill cut-out would eat into them:
+// find the disc instead (the extent of everything that is not page white), crop it square and give it a soft circular edge.
+async function circleCut(f, size) {
+  const { data, w, h } = await loadRGBA(f)
+  const solid = (i) => {
+    const r = data[i * 4],
+      g = data[i * 4 + 1],
+      b = data[i * 4 + 2]
+    return Math.min(r, g, b) < 228 || Math.max(r, g, b) - Math.min(r, g, b) > 14
+  }
+  // bounding box of the object (a row or column needs a few solid pixels, so stray specks do not count)
+  const rows = new Int32Array(h),
+    cols = new Int32Array(w)
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (solid(y * w + x)) {
+        rows[y]++
+        cols[x]++
+      }
+  const first = (arr) => arr.findIndex((n) => n > 3)
+  const last = (arr) => arr.length - 1 - [...arr].reverse().findIndex((n) => n > 3)
+  const x0 = first(cols),
+    x1 = last(cols),
+    y0 = first(rows),
+    y1 = last(rows)
+  const cx = (x0 + x1) / 2,
+    cy = (y0 + y1) / 2,
+    R = Math.max(x1 - x0, y1 - y0) / 2
+  const side = Math.ceil(R * 2) + 4
+  const out = Buffer.alloc(side * side * 4)
+  for (let y = 0; y < side; y++)
+    for (let x = 0; x < side; x++) {
+      const sx = Math.round(cx - side / 2 + x),
+        sy = Math.round(cy - side / 2 + y)
+      const o = (y * side + x) * 4
+      if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue
+      const i = sy * w + sx
+      const d = Math.hypot(sx - cx, sy - cy)
+      const alpha = Math.max(0, Math.min(1, (R - 1.5 - d) / 2.5)) // fades out over the last 2.5 px inside the edge
+      out[o] = data[i * 4]
+      out[o + 1] = data[i * 4 + 1]
+      out[o + 2] = data[i * 4 + 2]
+      out[o + 3] = Math.round(alpha * 255)
+    }
+  console.log(`  ${path.basename(f)}: disc centre ${cx.toFixed(0)},${cy.toFixed(0)} radius ${R.toFixed(0)}`)
+  return sharp(out, { raw: { width: side, height: side, channels: 4 } }).resize(size, size)
+}
 if (!only || only === 'statues') {
-  for (let k = 1; k <= 3; k++) {
-    const f = path.join(src, `statue-${k}.jpg`)
+  for (const [name, id] of [
+    ['statues', 'statue'],
+    ['fountain', 'fountain'],
+  ]) {
+    const f = path.join(src, name + '.jpg')
     if (!fs.existsSync(f)) {
-      console.log('no statue-' + k + '.jpg yet: skipped')
+      console.log('no ' + name + '.jpg: skipped')
       continue
     }
-    await save(await cutout(f, { square: true, keepLargest: true, size: 384, bgMin: 240 }), `statues/s${k}.webp`, { quality: 84, alphaQuality: 92 })
+    await save(await circleCut(f, 512), `statues/${id}.webp`, { quality: 86, alphaQuality: 95 })
   }
 }
 

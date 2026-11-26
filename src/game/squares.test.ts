@@ -11,6 +11,7 @@ import { carGrid } from './world/carGrid'
 import { TILE } from './world/city'
 import type { City, Tile } from './world/city'
 import { LaneDriver, Traffic } from './world/traffic'
+import { MONUMENT_FILES, monumentFor, WORLD_FILES } from './world/worldArt'
 import { World } from './world/world'
 
 // The statue squares sit ON crossings of two roads: a roundabout with the statue on its island and paved plaza corners around it.
@@ -105,6 +106,31 @@ describe('statue squares: geometry', () => {
       }
       const corners = t.blocks.filter((b) => b.corner).length
       expect(corners).toBe(12)
+    }
+  }, 60_000)
+
+  it('the three squares of a town take turns: statue, fountain, statue, and both pictures are preloaded', () => {
+    expect([0, 1, 2].map(monumentFor)).toEqual(['statue', 'fountain', 'statue'])
+    for (const f of Object.values(MONUMENT_FILES)) expect(WORLD_FILES).toContain(f)
+  })
+
+  it('the monument fills the island: a drawn centre plus two hidden collider boxes, all inside the island so the ring lane stays clear', () => {
+    const seen = new Set<Tile>()
+    for (const { t } of windows(CENTRES)) {
+      if (seen.has(t)) continue
+      seen.add(t)
+      for (const q of t.squares) {
+        const mine = t.buildings.filter((bd) => bd.kind === 'statue' && Math.hypot(bd.x - q.cx, bd.y - q.cy) < 0.01)
+        expect(mine.filter((bd) => !bd.hidden)).toHaveLength(1)
+        expect(mine.filter((bd) => bd.hidden)).toHaveLength(2)
+        for (const bd of mine) {
+          expect(bd.ri).toBe(q.ri)
+          for (const [x, y] of [[bd.x0, bd.y0], [bd.x1, bd.y0], [bd.x0, bd.y1], [bd.x1, bd.y1]]) expect(Math.hypot(x - q.cx, y - q.cy)).toBeLessThan(q.ri)
+        }
+        // together they cover most of the island's width, so a car cannot drive onto the plinth along the axes
+        const reach = Math.max(...mine.map((bd) => bd.x1 - q.cx))
+        expect(reach).toBeGreaterThan(q.ri * 0.85)
+      }
     }
   }, 60_000)
 

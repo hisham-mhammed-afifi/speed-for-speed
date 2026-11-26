@@ -9,7 +9,7 @@ import type { camera as Camera } from "./camera";
 import type { Car } from "../physics/car";
 import { Props } from "../world/props";
 import { quality } from "./quality";
-import { GRASS_FILES, LOTS, STATUE_FILES, TEXTURE_FILES, TREE_FILES, treeSpecies } from "../world/worldArt";
+import { GRASS_FILES, LOTS, MONUMENT_FILES, monumentFor, TEXTURE_FILES, TREE_FILES, treeSpecies } from "../world/worldArt";
 import type { City, Tile } from "../world/city";
 import type { Heli, Spike } from "../ai/heat";
 import type { Block, BlockRoad, Building, LotPlacement, Vec2 } from "../types";
@@ -819,8 +819,39 @@ function drawRock(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera
   }
 }
 
-/** a statue square's centrepiece: a stone basin of moving water, a pedestal, and the statue (the artist's picture, or a bronze placeholder) */
-function drawStatue(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
+/** The centrepiece of a statue square: the artist's round picture of a statue or a fountain filling the island (a drawn placeholder if the picture is missing). */
+function drawMonument(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
+  const kind = monumentFor(b.art ?? 0);
+  const im = images[MONUMENT_FILES[kind]];
+  if (!im) return drawStatuePlaceholder(ctx, b, cam);
+  const r = (b.ri ?? 7.5) - 0.5;
+  const cx = b.x,
+    cy = b.y;
+  // a soft shadow thrown towards the bottom right, like the buildings'
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.arc(cx + 1.3, cy + 1.5, r, 0, TAU);
+  ctx.fill();
+  // it leans with the camera a little, so it reads as standing up
+  const lx = (cx - cam.x) * 0.0012 * 4,
+    ly = (cy - cam.y) * 0.0012 * 4;
+  ctx.drawImage(im, cx - r + lx, cy - r + ly, r * 2, r * 2);
+  if (kind === "fountain") {
+    // ripples spreading over the water, faint enough to leave the spouts showing
+    const t = game.time;
+    for (let q = 0; q < 3; q++) {
+      const ph = (t * 0.25 + q / 3) % 1;
+      ctx.strokeStyle = `rgba(255,255,255,${0.32 * (1 - ph)})`;
+      ctx.lineWidth = 0.14;
+      ctx.beginPath();
+      ctx.arc(cx + lx, cy + ly, r * (0.42 + ph * 0.4), 0, TAU);
+      ctx.stroke();
+    }
+  }
+}
+
+/** the drawn stand-in for the monument pictures: a stone basin of moving water, a pedestal and a bronze figure */
+function drawStatuePlaceholder(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
   const cx = b.x,
     cy = b.y,
     t = game.time;
@@ -869,11 +900,6 @@ function drawStatue(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Came
   const sp = lift(9);
   const px = cx + sp.x,
     py = cy + sp.y;
-  const im = STATUE_FILES[k] ? images[STATUE_FILES[k]] : undefined;
-  if (im) {
-    ctx.drawImage(im, px - 3.8, py - 3.8, 7.6, 7.6);
-    return;
-  }
   // placeholder: a bronze figure with outstretched arms, an obelisk or a globe, depending on which statue it is
   ctx.save();
   ctx.translate(px, py);
@@ -939,9 +965,9 @@ function drawBuilding(
   b: Building,
   cam: typeof Camera,
 ): void {
-  if (b.flat) return; // part of a photo lot: already in the picture
+  if (b.flat || b.hidden) return; // part of a photo lot (already in the picture), or a collider only
   if (b.kind === "rock") return drawRock(ctx, b, cam);
-  if (b.kind === "statue") return drawStatue(ctx, b, cam);
+  if (b.kind === "statue") return drawMonument(ctx, b, cam);
   const k = 0.0012 * b.height;
   const sx = (b.x - cam.x) * k,
     sy = (b.y - cam.y) * k;
@@ -1010,7 +1036,7 @@ function drawShadows(ctx: CanvasRenderingContext2D, list: Building[]): void {
   for (let i = 0; i < list.length; i++) {
     const b = list[i],
       s = b.height * 0.2;
-    if (b.flat || b.kind === "rock" || b.kind === "statue") continue; // those draw their own shadows
+    if (b.flat || b.hidden || b.kind === "rock" || b.kind === "statue") continue; // those draw their own shadows
     ctx.fillRect(b.x0 + s * 0.5, b.y0 + s * 0.5, b.x1 - b.x0, b.y1 - b.y0);
     ctx.fillRect(b.x0 + s, b.y0 + s, b.x1 - b.x0, b.y1 - b.y0);
   }

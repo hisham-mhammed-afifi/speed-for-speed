@@ -515,8 +515,19 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
   // the statues, one on each square's island (inside the island, clear of the ring lane)
   for (const sq of squares) {
     const h = Math.min(4.5, sq.ri * 0.6)
-    push('statue', nearestSeed(sq.cx, sq.cy), sq.cx - h, sq.cy - h, sq.cx + h, sq.cy + h, 9, [140, 142, 148], false)
-    buildings[buildings.length - 1].art = sq.k
+    const dist = nearestSeed(sq.cx, sq.cy)
+    push('statue', dist, sq.cx - h, sq.cy - h, sq.cx + h, sq.cy + h, 9, [140, 142, 148], false)
+    const monument = buildings[buildings.length - 1]
+    monument.art = sq.k
+    monument.ri = sq.ri
+    // the monument fills the whole island: two more boxes (colliders only, never drawn) make a cross out to its edge, their corners still inside the island
+    for (const [fx, fy] of [[0.9, 0.4], [0.4, 0.9]]) {
+      push('statue', dist, sq.cx - fx * sq.ri, sq.cy - fy * sq.ri, sq.cx + fx * sq.ri, sq.cy + fy * sq.ri, 9, [140, 142, 148], false)
+      const box = buildings[buildings.length - 1]
+      box.hidden = true
+      box.art = sq.k
+      box.ri = sq.ri
+    }
   }
   // bend parks: trees over the whole 2 x 2 park (the inner streets are gone), clear of the roads
   for (const sb of supers) {

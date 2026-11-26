@@ -166,6 +166,10 @@ export interface Building {
   stamp: number
   /** which statue (statues) or the shape seed (rocks) */
   art?: number
+  /** statues: radius of the square's island, which the monument fills */
+  ri?: number
+  /** a collider only: never drawn, no shadow (the extra boxes that fill a monument's island) */
+  hidden?: boolean
   /** part of a landmark lot: the photo already shows its roof, so only the collider exists (nothing is drawn) */
   flat?: boolean
 }
