@@ -80,6 +80,55 @@ function tracePath(ctx: CanvasRenderingContext2D, r: BlockRoad, s0: number, s1: 
   }
 }
 
+/** The bend parks (lawn over the removed streets) and the roundabouts (circle, lane line, grass island) of a tile. */
+function drawSupers(ctx: CanvasRenderingContext2D, t: Tile, vis: Visible): void {
+  for (const sb of t.supers) {
+    if (sb.x1 < vis.x0 || sb.x0 > vis.x1 || sb.y1 < vis.y0 || sb.y0 > vis.y1) continue;
+    if (sb.kind === "bend") {
+      ctx.fillStyle = pat.sidewalk;
+      ctx.fillRect(sb.x0, sb.y0, sb.x1 - sb.x0, sb.y1 - sb.y0);
+      ctx.fillStyle = pat.grass;
+      ctx.fillRect(sb.x0 + 3, sb.y0 + 3, sb.x1 - sb.x0 - 6, sb.y1 - sb.y0 - 6);
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 0.3;
+      ctx.strokeRect(sb.x0, sb.y0, sb.x1 - sb.x0, sb.y1 - sb.y0);
+      continue;
+    }
+    const rc = (sb.ri + sb.ro) / 2;
+    ctx.fillStyle = pat.asphalt;
+    ctx.beginPath();
+    ctx.arc(sb.cx, sb.cy, sb.ro, 0, 6.2832);
+    ctx.fill();
+    // the kerb round the outside, left open where the four arms come in
+    const th = Math.asin(Math.min(0.95, t.H.wid[sb.cj] / 2 / sb.ro)),
+      tv = Math.asin(Math.min(0.95, t.V.wid[sb.ci] / 2 / sb.ro));
+    ctx.strokeStyle = pat.sidewalk;
+    ctx.lineWidth = 2.4;
+    for (let q = 0; q < 4; q++) {
+      const base = (q * Math.PI) / 2;
+      ctx.beginPath();
+      ctx.arc(sb.cx, sb.cy, sb.ro + 0.5, base + (q % 2 ? tv : th), base + Math.PI / 2 - (q % 2 ? th : tv));
+      ctx.stroke();
+    }
+    // the lane line, and the island with its kerb
+    ctx.strokeStyle = "rgba(240,240,240,0.8)";
+    ctx.lineWidth = 0.2;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.arc(sb.cx, sb.cy, rc, 0, 6.2832);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = pat.sidewalk;
+    ctx.beginPath();
+    ctx.arc(sb.cx, sb.cy, sb.ri + 1.2, 0, 6.2832);
+    ctx.fill();
+    ctx.fillStyle = pat.grass;
+    ctx.beginPath();
+    ctx.arc(sb.cx, sb.cy, sb.ri, 0, 6.2832);
+    ctx.fill();
+  }
+}
+
 /** The winding roads of a tile: a kerb, the asphalt and a dashed centre line, laid over the park they cross. */
 function drawCurves(ctx: CanvasRenderingContext2D, t: Tile, vis: Visible): void {
   ctx.lineJoin = "round";
@@ -150,6 +199,7 @@ function drawGround(
       ctx.lineWidth = 0.3;
       ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0);
     }
+    if (t.supers.length) drawSupers(ctx, t, vis);
     if (t.curves.length) drawCurves(ctx, t, vis);
   }
   // the rivers, with bridge decks (rails on both sides) where the bridge streets cross them
@@ -274,9 +324,16 @@ function drawMarkings(
       w = city.vw[i];
     if (x + w / 2 < vis.x0 || x - w / 2 > vis.x1) continue;
     for (let j = 0; j < city.NH - 1; j++) {
-      const y0 = city.hy[j] + city.hw[j] / 2 + 5,
+      let y0 = city.hy[j] + city.hw[j] / 2 + 5,
         y1 = city.hy[j + 1] - city.hw[j + 1] / 2 - 5;
       if (y1 < vis.y0 || y0 > vis.y1) continue;
+      const na = j * city.NV + i,
+        nb = na + city.NV;
+      if (city.isDead(na) || city.isDead(nb)) continue; // a street a bend park removed
+      const ra = city.roundAt(na),
+        rb = city.roundAt(nb);
+      if (ra) y0 = Math.max(y0, city.hy[j] + ra.ro + 3); // the lines stop at a roundabout's circle
+      if (rb) y1 = Math.min(y1, city.hy[j + 1] - rb.ro - 3);
       drawRoadSeg(ctx, false, x, w, city.vt[i], y0, y1);
     }
   }
@@ -285,10 +342,17 @@ function drawMarkings(
       w = city.hw[j];
     if (y + w / 2 < vis.y0 || y - w / 2 > vis.y1) continue;
     for (let i = 0; i < city.NV - 1; i++) {
-      const x0 = city.vx[i] + city.vw[i] / 2 + 5,
+      let x0 = city.vx[i] + city.vw[i] / 2 + 5,
         x1 = city.vx[i + 1] - city.vw[i + 1] / 2 - 5;
       if (x1 < vis.x0 || x0 > vis.x1) continue;
       if (city.waterBlocked(i, j)) continue; // water, not road
+      const na = j * city.NV + i,
+        nb = na + 1;
+      if (city.isDead(na) || city.isDead(nb)) continue;
+      const ra = city.roundAt(na),
+        rb = city.roundAt(nb);
+      if (ra) x0 = Math.max(x0, city.vx[i] + ra.ro + 3);
+      if (rb) x1 = Math.min(x1, city.vx[i + 1] - rb.ro - 3);
       drawRoadSeg(ctx, true, y, w, city.ht[j], x0, x1);
     }
   }
@@ -304,10 +368,13 @@ function drawMarkings(
       const vw = city.vw[i],
         hw = city.hw[j];
       if (city.vt[i] === "highway" || city.ht[j] === "highway") continue; // no zebra crossings on or beside the highway ring
+      const node = j * city.NV + i;
+      if (city.isDead(node) || city.roundAt(node)) continue; // no crossing here any more, or a roundabout
       if (city.vt[i] !== "alley") {
         for (let sgn = -1; sgn <= 1; sgn += 2) {
           const yy = y + sgn * (hw / 2 + 1.6) - 1.1;
           if ((j === 0 && sgn < 0) || (j === city.NH - 1 && sgn > 0)) continue;
+          if (city.isDead(node + sgn * city.NV)) continue; // that arm was removed
           for (let k = x - vw / 2 + 1; k < x + vw / 2 - 1; k += 1.15)
             ctx.rect(k, yy, 0.6, 2.2);
         }
@@ -316,6 +383,7 @@ function drawMarkings(
         for (let sgn = -1; sgn <= 1; sgn += 2) {
           const xx = x + sgn * (vw / 2 + 1.6) - 1.1;
           if ((i === 0 && sgn < 0) || (i === city.NV - 1 && sgn > 0)) continue;
+          if (city.isDead(node + sgn)) continue;
           for (let k = y - hw / 2 + 1; k < y + hw / 2 - 1; k += 1.15)
             ctx.rect(xx, k, 2.2, 0.6);
         }

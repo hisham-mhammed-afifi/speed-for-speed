@@ -225,6 +225,7 @@ class GameEngine {
     Phys.reset()
     FX.clearSkids()
     heat.reset()
+    Traffic.clearHolds()
     if (this.cx !== 0 || this.cy !== 0) this.setWindow(0, 0) // every run starts in the home tile
     const city = game.city
     const n = city.centerNode(),
@@ -402,6 +403,7 @@ class GameEngine {
   private setWindow(cx: number, cy: number): void {
     const next = World.build(cx, cy, 1)
     this.releaseMaps(game.city, next)
+    Traffic.clearHolds()
     game.city = next
     this.cx = cx
     this.cy = cy
@@ -417,6 +419,7 @@ class GameEngine {
     const old = game.city
     const next = World.build(ncx, ncy, 1)
     this.releaseMaps(old, next)
+    Traffic.clearHolds() // node ids shift with the window
     const di = (old.tx0 - next.tx0) * TILE,
       dj = (old.ty0 - next.ty0) * TILE
     const map = (id: number): number => {

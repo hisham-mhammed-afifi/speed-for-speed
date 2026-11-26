@@ -97,10 +97,19 @@ loops allocate nothing per step (`carGrid` hash, A* typed arrays and heap, `hyp`
 tiles near the view. Soak test: open `/?debug&heat=3`, run `scripts/soak-bot.js` in the page, and read `window.__soak` (frame time, work time,
 `canvasMB()` and heap every 10 s); frame time, canvas memory (under about 5 MB) and heap stay flat.
 
-Winding roads: about a tenth of each tile's blocks become parks crossed by a curved road (`tile.ts`, own random stream; `world/curve.ts` has the
-Hermite path and its distance / projection helpers). Chains of 3 to 6 blocks weave corner to corner, every curve is an extra edge between two
-existing crossings (`city.isCurve / edgeLength / edgeProject / edgePoint`), so node ids, A* and recentring are unchanged. Traffic and
-patrols follow them (`LaneDriver`), pursuing cops aim along the bend, and traps and cut-offs stay on straight streets.
+Bends and roundabouts: each tile has five 2 x 2 block parks (`tile.ts`, own random stream; `world/curve.ts` has the Hermite path and its
+distance / projection helpers). In a *bend* park the centre crossing and its four inner streets are gone (lawn again), and two sweeping
+quarter-turn roads join the mid-side crossings, leaving each street along its own direction. In a *roundabout* park the centre crossing is a
+circle with a grass island. Bends are extra graph edges (`city.isCurve / edgeLength / edgeProject / edgePoint`; removed crossings are
+`city.isDead`, roundabouts `city.roundAt`), so node ids, A* and recentring are unchanged. Cops aim along a bend, and traps and cut-offs
+stay on straight streets.
+
+Traffic that doesn't crash (`world/traffic.ts`, `ai/drive.ts`): every car books a junction (3+ roads) before entering. A booking is granted
+only if it doesn't cross the path of one already granted or waiting longer (following cars and straight-through opposite cars share), and only
+if the road out of it has room. Cars wait at a stop line well back from the junction with the parking brake on, and drive each turn along a
+connector curve from their lane in to their lane out. Roundabouts give way to the ring and exit on a curve. `capForTraffic` also looks
+along the steering path and at cars converging from the side (priority to the right). Wedged cars out of sight are recycled. Test:
+80 civilians in 330 m of town run 90 s with no civilian-civilian collision (`game.test.ts`).
 
 Chase rules: holding one heading above 30 m/s for 6 s makes you predictable and the evade meter stops filling until you make a real turn
 (over 50 degrees), slow down or enter a tunnel; the highway fills it at half rate; a long highway run draws a three-car roadblock 300-400 m

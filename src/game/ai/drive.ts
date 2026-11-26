@@ -25,6 +25,13 @@ export function speedTo(car: Car, target: number): void {
   const c = car.ctrl
   c.nitro = 0
   c.handbrake = 0
+  if (target < 0.2 && v < 1.5) {
+    // asked to stop: hold still with the parking brake (the pedal would creep forward, or reverse)
+    c.throttle = 0
+    c.brake = 0
+    c.handbrake = 1
+    return
+  }
   if (err > 0.6) {
     c.throttle = clamp(err * 0.4, 0.15, 1)
     c.brake = 0
@@ -61,10 +68,20 @@ export function avoid(car: Car, city: City): boolean {
 
 const nearScratch: Car[] = []
 
-/** Slow down for cars directly ahead; returns a capped target speed. Only looks at nearby cars (see carGrid). */
-export function capForTraffic(car: Car, target: number, maxLook?: number): number {
-  const fx = Math.cos(car.theta),
+/**
+ * Slow down for cars in our way; returns a capped target speed. Only looks at nearby cars (see carGrid).
+ * A car that is turning looks along the way it is steering (aimX, aimY: the vector to its steering target), not along its bonnet.
+ */
+export function capForTraffic(car: Car, target: number, maxLook?: number, aimX?: number, aimY?: number): number {
+  let fx = Math.cos(car.theta),
     fy = Math.sin(car.theta)
+  if (aimX !== undefined && aimY !== undefined) {
+    const al = Math.sqrt(aimX * aimX + aimY * aimY)
+    if (al > 1) {
+      fx = aimX / al
+      fy = aimY / al
+    }
+  }
   const look = maxLook || 8 + car.speed * 1.3
   const cars = carGrid.query(car.x, car.y, look + 6, nearScratch)
   for (let k = 0; k < cars.length; k++) {
@@ -73,9 +90,29 @@ export function capForTraffic(car: Car, target: number, maxLook?: number): numbe
     const dx = o.x - car.x,
       dy = o.y - car.y
     const ahead = dx * fx + dy * fy
-    if (ahead < 0 || ahead > look) continue
-    const lat = Math.abs(dx * -fy + dy * fx)
-    if (lat < 2.4) target = Math.min(target, Math.max(0, (ahead - 6.5) * 0.9))
+    const side = dx * -fy + dy * fx // positive: the other car is on our right
+    const oncoming = Math.cos(car.theta - o.theta) < -0.3
+    // cars are 1.9 m wide and lanes 3.6 m apart: an oncoming car in its own lane passes with room to spare, anything else in our corridor does not
+    if (ahead >= 0 && ahead <= look && (Math.abs(side) < (oncoming ? 2.0 : 2.4) || (o.speed < 1.5 && !oncoming && Math.abs(side) < 3.2))) {
+      // (a stopped car counts from a little further out to the side: it may be half way through a turn)
+      target = Math.min(target, Math.max(0, (ahead - 6.5) * 0.9))
+      continue
+    }
+    // a car coming in from the side (a turn, a merge, a bend) that will reach our path within a couple of seconds
+    if (ahead < -3 || o.speed < 1) continue
+    if (Math.abs(Math.cos(car.theta - o.theta)) > 0.9) continue // same or opposite flow: the lane check above covers it
+    const rvx = o.wvx - car.wvx,
+      rvy = o.wvy - car.wvy
+    const v2 = rvx * rvx + rvy * rvy
+    if (v2 < 1) continue
+    const tca = -(dx * rvx + dy * rvy) / v2
+    if (tca < 0.1 || tca > 2.5) continue
+    const mx = dx + rvx * tca,
+      my = dy + rvy * tca
+    if (mx * mx + my * my > 3 * 3) continue
+    // priority to the right: give way to a car on our right or right ahead (or any that is very close); the one on our left goes first
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (side > -1 || dist < 9) target = Math.min(target, Math.max(0, (dist - 8) * 0.7))
   }
   return target
 }

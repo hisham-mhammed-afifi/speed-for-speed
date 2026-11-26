@@ -34,9 +34,25 @@ function tileMap(t: Tile): HTMLCanvasElement {
     x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
+  // bend parks (lawn over the removed streets) and roundabouts
+  for (const sb of t.supers) {
+    if (sb.kind === 'bend') {
+      x.fillStyle = '#25472c'
+      x.fillRect(sb.x0, sb.y0, sb.x1 - sb.x0, sb.y1 - sb.y0)
+    } else {
+      x.fillStyle = '#4a4f58'
+      x.beginPath()
+      x.arc(sb.cx, sb.cy, sb.ro, 0, 6.2832)
+      x.fill()
+      x.fillStyle = '#25472c'
+      x.beginPath()
+      x.arc(sb.cx, sb.cy, sb.ri, 0, 6.2832)
+      x.fill()
+    }
+  }
   // winding roads
   x.strokeStyle = '#4a4f58'
-  x.lineWidth = 9
+  x.lineWidth = 10
   x.lineJoin = 'round'
   for (const r of t.curves) {
     x.beginPath()

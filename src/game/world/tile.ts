@@ -5,7 +5,7 @@ import type { DistrictSeed, RGB, Tile } from './city'
 import { hash3 } from './layout'
 import type { LineSet } from './layout'
 import { fitScale, LOTS, lotDims, lotRect, tileGrid } from './worldArt'
-import type { Block, BlockDistrict, BlockRoad, Building, BuildingKind, Jump, LotPlacement, PropSpot, Rect, StaticRec, Tree, Tunnel, Wall } from '../types'
+import type { Block, BlockDistrict, BlockRoad, Building, SuperBlock, BuildingKind, Jump, LotPlacement, PropSpot, Rect, StaticRec, Tree, Tunnel, Wall } from '../types'
 
 const NAME_A = ['Port', 'North', 'East', 'West', 'South', 'Old', 'New', 'Fort', 'Lake', 'Mount', 'Cape', 'Grand', 'Iron', 'Silver', 'Red', 'Stone']
 const NAME_B = ['Ashford', 'Brook', 'Cove', 'Dale', 'Ridge', 'Haven', 'Mill', 'Point', 'Shore', 'Vale', 'Harbor', 'Heights', 'Crossing', 'Park', 'Bridge', 'Falls']
@@ -111,72 +111,79 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     }
   }
 
-  // ---------- winding roads: chains of park blocks, each crossed by a curve from one crossing to the opposite corner ----------
+  // ---------- superblocks: sweeping bends and roundabouts in 2 x 2 block parks ----------
   // (their own random stream, like the lots, so the rest of the town doesn't depend on them)
+  const supers: SuperBlock[] = []
   const curves: BlockRoad[] = []
+  const sbNodes = new Set<number>() // tile-local crossings a superblock uses, as j * NV + i
   {
     const RC = rng(hash3(seed ^ 0x2c0ffee, tx, ty))
-    const D2R = Math.PI / 180
-    let amp = 1
-    const jit = (deg: number) => (RC() * 2 - 1) * deg * D2R * amp
-    const chains = 4 + ((RC() * 3) | 0)
-    for (let c = 0; c < chains; c++) {
-      for (let attempt = 0; attempt < 16; attempt++) {
-        amp = attempt < 5 ? 1 : attempt < 10 ? 0.55 : 0.25 // bend less when the first tries don't fit the block
-        const steps = 3 + ((RC() * 4) | 0) // blocks in the chain
-        const i0 = 1 + ((RC() * (14 - steps + 1)) | 0)
-        // the nodes' rows: a random walk, one row per column step, kept on lines 1..15 (never touching the highway ring)
-        const nj: number[] = [1 + ((RC() * 15) | 0)]
-        const dir: number[] = []
-        for (let k = 0; k < steps; k++) {
-          const cur = nj[k]
-          const d = cur <= 1 ? 1 : cur >= 15 ? -1 : k > 0 && RC() < 0.75 ? -dir[k - 1] : RC() < 0.5 ? 1 : -1 // mostly weave up and down
-          dir.push(d)
-          nj.push(cur + d)
+    const K = 1.657 // Hermite tangent length for a quarter ellipse, in units of the semi-axis
+    const kinds: ('bend' | 'round')[] = ['bend', 'bend', 'bend', 'round', 'round']
+    for (const kind of kinds) {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const i = 1 + ((RC() * 13) | 0),
+          j = 1 + ((RC() * 13) | 0) // top-left block: keeps clear of the highway ring and its ramps
+        if (i <= 8 && 8 <= i + 2 && j <= 8 && 8 <= j + 2) continue // the middle crossing is where the window starts
+        if (riverCol >= 0 && i <= riverCol + 1 && i + 2 >= riverCol) continue
+        const idx = [j * TILE + i, j * TILE + i + 1, (j + 1) * TILE + i, (j + 1) * TILE + i + 1]
+        if (idx.some((q) => blocks[q].sb || blocks[q].type === 'water')) continue
+        const nodes: number[] = []
+        for (let dj = 0; dj < 3; dj++) for (let di = 0; di < 3; di++) nodes.push((j + dj) * NV + i + di)
+        if (nodes.some((n) => sbNodes.has(n))) continue // superblocks never share a crossing
+        const sb: SuperBlock = {
+          i,
+          j,
+          kind,
+          x0: vx[i] + vw[i] / 2,
+          x1: vx[i + 2] - vw[i + 2] / 2,
+          y0: hy[j] + hw[j] / 2,
+          y1: hy[j + 2] - hw[j + 2] / 2,
+          ci: i + 1,
+          cj: j + 1,
+          cx: vx[i + 1],
+          cy: hy[j + 1],
+          ri: 0,
+          ro: 0,
+          arcs: [],
         }
-        const idx = nj.slice(0, -1).map((j, k) => Math.min(j, nj[k + 1]) * TILE + i0 + k)
-        if (idx.some((q) => blocks[q].road || blocks[q].type === 'water' || blocks[q].i === riverCol)) continue
-        // tangent angle at each node: along the chord when both neighbours bend the same way, nearly level when the road zigzags
-        const chord = dir.map((_d, k) => Math.atan2(hy[nj[k + 1]] - hy[nj[k]], vx[i0 + k + 1] - vx[i0 + k]))
-        const th: number[] = []
-        for (let k = 0; k <= steps; k++) {
-          if (k === 0) th.push(chord[0] + jit(35))
-          else if (k === steps) th.push(chord[steps - 1] + jit(35))
-          else th.push(dir[k - 1] === dir[k] ? (chord[k - 1] + chord[k]) / 2 + (k % 2 ? 1 : -1) * (14 + RC() * 24) * D2R * amp : jit(8)) // weave left and right
-        }
-        const roads: BlockRoad[] = []
-        let ok = true
-        for (let k = 0; k < steps && ok; k++) {
-          const ax = vx[i0 + k],
-            ay = hy[nj[k]],
-            bx = vx[i0 + k + 1],
-            by = hy[nj[k + 1]]
-          const chordLen = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-          const mag = chordLen * (0.4 + RC() * 0.35)
-          const r = hermite(ax, ay, bx, by, th[k], th[k + 1], mag, mag)
-          r.ai = i0 + k
-          r.aj = nj[k]
-          r.bi = i0 + k + 1
-          r.bj = nj[k + 1]
-          // beyond the crossings, the road must stay inside its block (inset by its own half width and a sidewalk)
-          const b = blocks[idx[k]]
-          const inset = CURVE_W / 2 + 1.5
-          for (let q = 0; q < r.pts.length && ok; q += 2) {
-            const x = r.pts[q],
-              y = r.pts[q + 1]
-            const nearA = (x - ax) * (x - ax) + (y - ay) * (y - ay) < 32 * 32,
-              nearB = (x - bx) * (x - bx) + (y - by) * (y - by) < 32 * 32
-            if (!nearA && !nearB && (x < b.x0 + inset || x > b.x1 - inset || y < b.y0 + inset || y > b.y1 - inset)) ok = false
+        if (kind === 'round') {
+          sb.ro = Math.max(vw[i + 1], hw[j + 1]) / 2 + 10
+          sb.ri = sb.ro - 8
+        } else {
+          // mid-side crossings: T top, B bottom, L left, R right. Each arc leaves its crossing along that street's own direction.
+          const T = [i + 1, j],
+            B = [i + 1, j + 2],
+            L = [i, j + 1],
+            R = [i + 2, j + 1]
+          const arc = (p: number[], q: number[], angA: number, angB: number, vertFirst: boolean): void => {
+            const ax = vx[p[0]],
+              ay = hy[p[1]],
+              bx = vx[q[0]],
+              by = hy[q[1]]
+            const dx = Math.abs(bx - ax),
+              dy = Math.abs(by - ay)
+            const r = hermite(ax, ay, bx, by, angA, angB, K * (vertFirst ? dy : dx), K * (vertFirst ? dx : dy))
+            r.ai = p[0]
+            r.aj = p[1]
+            r.bi = q[0]
+            r.bj = q[1]
+            sb.arcs.push(r)
           }
-          roads.push(r)
+          const H = Math.PI / 2
+          if (RC() < 0.5) {
+            arc(T, R, H, 0, true) // south out of T, east into R
+            arc(L, B, 0, H, false) // east out of L, south into B
+          } else {
+            arc(T, L, H, Math.PI, true) // south out of T, west into L
+            arc(R, B, Math.PI, H, false) // west out of R, south into B
+          }
+          for (const r of sb.arcs) curves.push(r)
         }
-        if (!ok) continue
-        roads.forEach((r, k) => {
-          const b = blocks[idx[k]]
-          b.type = 'park'
-          b.road = r
-          curves.push(r)
-        })
+        for (const q of idx) blocks[q].sb = sb
+        for (const q of idx) blocks[q].type = 'park'
+        for (const n of nodes) sbNodes.add(n)
+        supers.push(sb)
         break
       }
     }
@@ -398,15 +405,31 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       if (b.district === 'downtown') towerSplit(x0, y0, x1, y1, 0)
       else if (b.district === 'port') genPort(x0, y0, x1, y1)
       else genSuburbs(x0, y0, x1, y1)
-    } else if (b.type === 'park') {
+    } else if (b.type === 'park' && b.sb?.kind !== 'bend') {
+      const sb = b.sb
       for (let ty = y0 + 8; ty < y1 - 4; ty += 13) {
         for (let tx = x0 + 8; tx < x1 - 4; tx += 13) {
           if (R() < 0.7) {
             const t: Tree = { x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() }
-            const clear = b.road ? CURVE_W / 2 + t.r + 1.5 : 0 // no canopy over a winding road
-            if (!b.road || roadDist2(b.road, t.x, t.y) > clear * clear) trees.push(t)
+            if (sb) {
+              const clear = sb.ro + t.r + 3 // no canopy over a roundabout
+              if ((t.x - sb.cx) * (t.x - sb.cx) + (t.y - sb.cy) * (t.y - sb.cy) < clear * clear) continue
+            }
+            trees.push(t)
           }
         }
+      }
+    }
+  }
+  // bend parks: trees over the whole 2 x 2 park (the inner streets are gone), clear of the roads
+  for (const sb of supers) {
+    if (sb.kind !== 'bend') continue
+    for (let ty = sb.y0 + 8; ty < sb.y1 - 4; ty += 13) {
+      for (let tx = sb.x0 + 8; tx < sb.x1 - 4; tx += 13) {
+        if (R() >= 0.7) continue
+        const t: Tree = { x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() }
+        const clear = CURVE_W / 2 + t.r + 1.5
+        if (sb.arcs.every((a: BlockRoad) => roadDist2(a, t.x, t.y) > clear * clear)) trees.push(t)
       }
     }
   }
@@ -484,7 +507,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     const r = (R() * (k + 1)) | 0
     ;[edges[k], edges[r]] = [edges[r], edges[k]]
   }
-  const usedNodes = new Set<number>()
+  const usedNodes = new Set<number>(sbNodes) // tunnels, ramps and construction keep clear of the superblocks
   const takeEdge = (): Edge | null => {
     for (let k = 0; k < edges.length; k++) {
       const e = edges[k]
@@ -562,7 +585,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
   }
   // park fences: a row of light panels along one roadside edge of each park (smash through for a shortcut)
   for (const b of blocks) {
-    if (b.type !== 'park') continue
+    if (b.type !== 'park' || b.sb) continue
     const side = (R() * 4) | 0
     const horizEdge = side < 2
     const from = (horizEdge ? b.x0 : b.y0) + 6,
@@ -571,7 +594,6 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       if (R() < 0.12) continue
       const fx = horizEdge ? t : side === 2 ? b.x0 + 1.5 : b.x1 - 1.5,
         fy = horizEdge ? (side === 0 ? b.y0 + 1.5 : b.y1 - 1.5) : t
-      if (b.road && roadDist2(b.road, fx, fy) < (CURVE_W / 2 + 2) * (CURVE_W / 2 + 2)) continue // the road passes through the fence line
       addProp('fence', fx, fy, horizEdge ? 0 : Math.PI / 2)
     }
   }
@@ -605,6 +627,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     gravel,
     propSpots,
     curves,
+    supers,
     riverCol,
     bridgeRows,
     statics,

@@ -1,8 +1,8 @@
 import type { BlockRoad } from '../types'
 
 /** Width of a winding road, and how far from its centre line the driving lane's centre is. */
-export const CURVE_W = 10
-export const CURVE_LANE = 2
+export const CURVE_W = 11
+export const CURVE_LANE = 1.8
 
 const SAMPLES = 36
 

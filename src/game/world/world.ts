@@ -4,7 +4,7 @@ import { CELL, LANE_OFFSET, RAMPS, SIDEWALK, SURF, TILE } from './city'
 import type { City, RoadType, Tile } from './city'
 import { Axis } from './layout'
 import { generateTile } from './tile'
-import type { Block, BlockRoad, Building, District, Rect, StaticRec, Wall } from '../types'
+import type { Block, BlockRoad, Building, SuperBlock, District, Rect, StaticRec, Wall } from '../types'
 
 export const DEFAULT_SEED = 20261123
 
@@ -292,6 +292,23 @@ export const World = {
           }
         }
 
+    // bend parks remove their centre crossing; roundabouts keep theirs, with a circle to drive round
+    const dead = new Set<number>()
+    const rounds = new Map<number, { cx: number; cy: number; ri: number; ro: number; rc: number }>()
+    for (let b = 0; b < n; b++)
+      for (let a = 0; a < n; a++)
+        for (const sb of tiles[b * n + a].supers) {
+          const id = (b * TILE + sb.cj) * NV + a * TILE + sb.ci
+          if (sb.kind === 'bend') dead.add(id)
+          else rounds.set(id, { cx: sb.cx, cy: sb.cy, ri: sb.ri, ro: sb.ro, rc: (sb.ri + sb.ro) / 2 })
+        }
+    /** the bend or roundabout park containing (x, y), if any */
+    const superAt = (x: number, y: number): SuperBlock | undefined => {
+      const t = city.tileAt(x, y)
+      if (t) for (const sb of t.supers) if (x >= sb.x0 && x <= sb.x1 && y >= sb.y0 && y <= sb.y1) return sb
+      return undefined
+    }
+
     const city: City = {
       NV,
       NH,
@@ -334,10 +351,12 @@ export const World = {
       },
       neighborsInto(id, out) {
         out.length = 0
+        if (dead.size && dead.has(id)) return out
         const i = id % NV,
           j = (id / NV) | 0
         const ring = onRing(i, j)
         const add = (ni: number, nj: number) => {
+          if (dead.size && dead.has(nj * NV + ni)) return
           const nRing = onRing(ni, nj)
           // highway <-> street only through a ramp (the highway-side node must be a ramp)
           if (ring !== nRing && !(ring ? isRamp(i, j) : isRamp(ni, nj))) return
@@ -353,11 +372,32 @@ export const World = {
         if (more) for (let k = 0; k < more.length; k++) out.push(more[k])
         return out
       },
-      nearestNode: (x, y) => nearestLine(hy, y) * NV + nearestLine(vx, x),
+      nearestNode(x, y) {
+        const id = nearestLine(hy, y) * NV + nearestLine(vx, x)
+        if (!dead.size || !dead.has(id)) return id
+        // a removed crossing: the nearest live one beside it
+        let best = id,
+          bd = Infinity
+        for (const o of [1, -1, NV, -NV]) {
+          const q = id + o
+          const d = (city.nodeX(q) - x) * (city.nodeX(q) - x) + (city.nodeY(q) - y) * (city.nodeY(q) - y)
+          if (d < bd) {
+            bd = d
+            best = q
+          }
+        }
+        return best
+      },
+      isDead: (id) => dead.has(id),
+      roundAt: (id) => rounds.get(id),
       edgeWidth: (a, b) => (curveOf.has(a * NC + b) ? CURVE_W : ((a / NV) | 0) === ((b / NV) | 0) ? hw[(a / NV) | 0] : vw[a % NV]),
       laneOffset: (a, b) => (curveOf.has(a * NC + b) ? CURVE_LANE : LANE_OFFSET[((a / NV) | 0) === ((b / NV) | 0) ? ht[(a / NV) | 0] : vt[a % NV]]),
       nodeHalfWidth: (id) => Math.max(vw[id % NV], hw[(id / NV) | 0]) / 2,
-      randomNode: () => (Math.random() * NV * NH) | 0,
+      randomNode() {
+        let id = (Math.random() * NV * NH) | 0
+        while (dead.has(id)) id = (Math.random() * NV * NH) | 0
+        return id
+      },
       randomNodeNear(x, y, rMin, rMax) {
         const a = Math.random() * 6.2832,
           d = rMin + Math.random() * (rMax - rMin)
@@ -386,6 +426,18 @@ export const World = {
       },
       surfaceAt(x, y) {
         if (x < minX || x > maxX || y < minY || y > maxY) return SURF.lot
+        const sb = superAt(x, y)
+        if (sb) {
+          if (sb.kind === 'round') {
+            const d2 = (x - sb.cx) * (x - sb.cx) + (y - sb.cy) * (y - sb.cy)
+            if (d2 <= sb.ro * sb.ro) return d2 <= sb.ri * sb.ri ? SURF.grass : SURF.asphalt // the island, then the circle
+          } else {
+            for (const a of sb.arcs) if (roadDist2(a, x, y) <= (a.w / 2) * (a.w / 2)) return SURF.asphalt
+            // the removed inner streets are lawn again
+            if (x < sb.x0 + SIDEWALK || x > sb.x1 - SIDEWALK || y < sb.y0 + SIDEWALK || y > sb.y1 - SIDEWALK) return SURF.sidewalk
+            return SURF.grass
+          }
+        }
         if (colRoad(x) >= 0 || rowRoad(y) >= 0) {
           const g = city.tileAt(x, y)?.gravel // construction zones: only this tile's few rectangles
           if (g) for (let k = 0; k < g.length; k++) if (inRect(g[k], x, y)) return SURF.gravel
@@ -393,7 +445,6 @@ export const World = {
         }
         const b = blockAt(x, y)
         if (!b) return SURF.lot
-        if (b.road && roadDist2(b.road, x, y) <= (b.road.w / 2) * (b.road.w / 2)) return SURF.asphalt // a winding road through the park
         if (x < b.x0 + SIDEWALK || x > b.x1 - SIDEWALK || y < b.y0 + SIDEWALK || y > b.y1 - SIDEWALK) return SURF.sidewalk
         return b.type === 'park' || b.district === 'suburbs' ? SURF.grass : SURF.lot
       },

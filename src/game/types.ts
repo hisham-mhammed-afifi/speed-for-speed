@@ -157,8 +157,31 @@ export interface Block {
   lots?: LotPlacement[]
   /** the strips of a lot block that are left for ordinary generated buildings */
   rest?: Rect[]
-  /** a winding road runs corner to corner through this (park) block */
-  road?: BlockRoad
+  /** this block is one quarter of a bend or roundabout superblock (see SuperBlock) */
+  sb?: SuperBlock
+}
+
+/**
+ * A 2 x 2 block park with a road feature in the middle. 'bend': the centre crossing and its four inner streets are gone, and two
+ * sweeping quarter-turn roads join the mid-side crossings. 'round': the centre crossing is a roundabout.
+ * (i, j) is the top-left block, (ci, cj) the centre crossing, all tile-local; x0..y1 is the park's rectangle (inner streets included).
+ */
+export interface SuperBlock {
+  i: number
+  j: number
+  kind: 'bend' | 'round'
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  ci: number
+  cj: number
+  cx: number
+  cy: number
+  /** roundabout: radius of the grass island and of the whole circle (metres); bend: 0 */
+  ri: number
+  ro: number
+  arcs: BlockRoad[]
 }
 
 export type LotId = 'villa' | 'campus' | 'residence'

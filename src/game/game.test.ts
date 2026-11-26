@@ -26,7 +26,7 @@ import { Car } from "./physics/car";
 import { Phys } from "./physics/world";
 import { game } from "./state";
 import { carGrid } from "./world/carGrid";
-import { LaneDriver } from "./world/traffic";
+import { LaneDriver, Traffic } from "./world/traffic";
 import { heat } from "./ai/heat";
 import { BRIDGES, LANE_OFFSET, RAMPS, RIVER_I, SURF, TILE } from "./world/city";
 import type { Tile } from "./world/city";
@@ -354,7 +354,10 @@ describe("city districts (plan 5)", () => {
     let reachable = 0;
     for (let id = 0; id < city.nodeCount; id++)
       if (findPath(city, from, id)) reachable++;
-    expect(reachable).toBe(city.nodeCount);
+    // every crossing a bend park hasn't removed
+    let live = 0;
+    for (let id = 0; id < city.nodeCount; id++) if (!city.isDead(id)) live++;
+    expect(reachable).toBe(live);
     // a trip to a far ring corner must go via a ramp
     const path = findPath(city, from, city.nodeId(0, 0))!;
     const entry = path.find(
@@ -925,7 +928,7 @@ describe("photo art, lanes and landmark lots at real-world scale", () => {
           stack.push(nb);
         }
     }
-    expect(seen.every((v) => v === 1)).toBe(true);
+    expect(seen.every((v, id) => v === 1 || city.isDead(id))).toBe(true); // the crossings bend parks removed have no roads
   });
 });
 
@@ -1427,107 +1430,142 @@ describe("performance structures", () => {
   });
 });
 
-describe("winding roads", () => {
+describe("bends and roundabouts", () => {
   let city = World.build(0, 0, 1);
-  let roads = city.tiles[4].curves;
   beforeEach(() => {
     World.init(); // other tests may have switched seeds
     city = World.build(0, 0, 1);
-    roads = city.tiles[4].curves;
   });
-  const nodes = (r: (typeof roads)[number]) => [
-    city.nodeId(TILE + r.ai, TILE + r.aj),
-    city.nodeId(TILE + r.bi, TILE + r.bj),
-  ];
+  const nodeOf = (t: Tile, i: number, j: number) => {
+    const a = city.tiles.indexOf(t) % 3,
+      b = Math.floor(city.tiles.indexOf(t) / 3);
+    return city.nodeId(a * TILE + i, b * TILE + j);
+  };
 
-  it("every tile has some, deterministically, each inside its own park block", () => {
-    for (const t of city.tiles) expect(t.curves.length).toBeGreaterThan(8);
-    World.cache.clear(); // regenerate from scratch
+  it("every tile has bends and roundabouts, deterministically, clear of the ring, river and spawn", () => {
+    for (const t of city.tiles) {
+      expect(
+        t.supers.filter((s) => s.kind === "bend").length,
+      ).toBeGreaterThanOrEqual(2);
+      expect(
+        t.supers.filter((s) => s.kind === "round").length,
+      ).toBeGreaterThanOrEqual(1);
+      const used = new Set<string>();
+      for (const s of t.supers) {
+        expect(s.i).toBeGreaterThan(0);
+        expect(s.j).toBeGreaterThan(0);
+        expect(s.i + 2).toBeLessThan(TILE);
+        expect(s.j + 2).toBeLessThan(TILE);
+        expect(s.i <= 8 && 8 <= s.i + 2 && s.j <= 8 && 8 <= s.j + 2).toBe(
+          false,
+        );
+        if (t.riverCol >= 0)
+          expect(s.i > t.riverCol + 1 || s.i + 2 < t.riverCol).toBe(true);
+        for (let dj = 0; dj < 3; dj++)
+          for (let di = 0; di < 3; di++) {
+            const k = s.i + di + "," + (s.j + dj);
+            expect(used.has(k)).toBe(false); // no two share a crossing
+            used.add(k);
+          }
+        for (const b of t.blocks) if (b.sb === s) expect(b.type).toBe("park");
+      }
+    }
+    World.cache.clear();
     const again = World.build(0, 0, 1);
-    expect(again.tiles[4].curves.map((r) => r.len)).toEqual(
-      roads.map((r) => r.len),
+    expect(again.tiles[4].supers.map((s) => [s.i, s.j, s.kind])).toEqual(
+      city.tiles[4].supers.map((s) => [s.i, s.j, s.kind]),
     );
-    for (const t of city.tiles)
-      for (const b of t.blocks)
-        if (b.road) {
-          expect(b.type).toBe("park");
-          expect(b.lots).toBeUndefined();
-          expect(b.i).toBeGreaterThan(0);
-          expect(b.i).toBeLessThan(15);
-        }
   });
 
-  it("never touch the highway ring, the river or a building", () => {
+  it("a bend park has no centre crossing, and its two arcs join mid-side crossings both ways", () => {
+    for (const t of city.tiles)
+      for (const s of t.supers.filter((q) => q.kind === "bend")) {
+        const c = nodeOf(t, s.ci, s.cj);
+        expect(city.isDead(c)).toBe(true);
+        expect(city.neighbors(c)).toEqual([]);
+        expect(city.roundAt(c)).toBeUndefined();
+        // the dead crossing never comes out of nearestNode
+        expect(city.nearestNode(s.cx, s.cy)).not.toBe(c);
+        expect(s.arcs).toHaveLength(2);
+        for (const r of s.arcs) {
+          const a = nodeOf(t, r.ai, r.aj),
+            b = nodeOf(t, r.bi, r.bj);
+          expect(city.neighbors(a)).toContain(b);
+          expect(city.neighbors(b)).toContain(a);
+          expect(city.neighbors(a)).not.toContain(c);
+          expect(city.isCurve(a, b)).toBe(true);
+          expect(city.edgeLength(a, b)).toBeCloseTo(r.len, 5);
+          // it leaves its crossing straight along a street: the tangent is axis-aligned at both ends
+          const out = { x: 0, y: 0, ux: 0, uy: 0, len: 0 };
+          for (const s0 of [0, r.len]) {
+            city.edgePoint(a, b, s0, 0, out);
+            expect(Math.min(Math.abs(out.ux), Math.abs(out.uy))).toBeLessThan(
+              0.12,
+            );
+          }
+          // an arc is long and smooth: about a quarter turn
+          expect(r.len).toBeGreaterThan(
+            Math.hypot(
+              city.nodeX(a) - city.nodeX(b),
+              city.nodeY(a) - city.nodeY(b),
+            ),
+          );
+        }
+      }
+  });
+
+  it("surfaces: lawn over a removed street, asphalt on an arc, island / ring / outside on a roundabout", () => {
+    for (const t of city.tiles) {
+      for (const s of t.supers) {
+        if (s.kind === "bend") {
+          expect(city.surfaceAt(s.cx, s.cy).kind).toBe("grass");
+          const r = s.arcs[0],
+            m = r.pts.length >> 1;
+          expect(
+            city.surfaceAt(r.pts[m - (m % 2)], r.pts[m - (m % 2) + 1]).kind,
+          ).toBe("asphalt");
+        } else {
+          expect(city.roundAt(nodeOf(t, s.ci, s.cj))).toBeDefined();
+          expect(city.surfaceAt(s.cx, s.cy).kind).toBe("grass"); // the island
+          expect(city.surfaceAt(s.cx + (s.ri + s.ro) / 2, s.cy).kind).toBe(
+            "asphalt",
+          ); // the ring
+          expect(
+            city.surfaceAt(s.cx + s.ro + 6, s.cy + s.ro + 6).kind,
+          ).not.toBe("asphalt"); // beside the arms: the park
+        }
+      }
+    }
+  });
+
+  it("never run into a building, the river or the highway ring", () => {
     for (const t of city.tiles)
       for (const r of t.curves) {
-        expect(r.ai % TILE).toBeGreaterThan(0);
-        expect(r.bi % TILE).toBeGreaterThan(0);
-        expect(r.aj % TILE).toBeGreaterThan(0);
-        expect(r.bj % TILE).toBeGreaterThan(0);
         for (let q = 0; q < r.pts.length; q += 2) {
           expect(city.inWater(r.pts[q], r.pts[q + 1])).toBe(false);
           expect(city.pointInBuilding(r.pts[q], r.pts[q + 1])).toBe(false);
-          // nor either edge of the 10 m road
           const q0 = Math.max(0, q - 2),
             q1 = Math.min(r.pts.length - 2, q + 2);
           const tx = r.pts[q1] - r.pts[q0],
             ty = r.pts[q1 + 1] - r.pts[q0 + 1];
           const tl = Math.hypot(tx, ty) || 1;
-          for (const sgn of [-1, 1]) {
+          for (const sgn of [-1, 1])
             expect(
               city.pointInBuilding(
-                r.pts[q] - (ty / tl) * 5 * sgn,
-                r.pts[q + 1] + (tx / tl) * 5 * sgn,
+                r.pts[q] - (ty / tl) * 6 * sgn,
+                r.pts[q + 1] + (tx / tl) * 6 * sgn,
               ),
             ).toBe(false);
-          }
         }
       }
   });
 
-  it("are asphalt, linked both ways in the road graph, and as long as their centre line", () => {
-    for (const r of roads) {
-      const [a, b] = nodes(r);
-      expect(city.neighbors(a)).toContain(b);
-      expect(city.neighbors(b)).toContain(a);
-      expect(city.isCurve(a, b)).toBe(true);
-      expect(city.edgeLength(a, b)).toBeCloseTo(r.len, 5);
-      expect(city.edgeLength(b, a)).toBeCloseTo(r.len, 5);
-      expect(city.edgeLength(a, b)).toBeGreaterThanOrEqual(
-        Math.hypot(
-          city.nodeX(a) - city.nodeX(b),
-          city.nodeY(a) - city.nodeY(b),
-        ) - 1e-6,
-      );
-      const m = r.pts.length >> 1;
-      expect(
-        city.surfaceAt(r.pts[m - (m % 2)], r.pts[m - (m % 2) + 1]).kind,
-      ).toBe("asphalt");
-      // a lane point is to the right of the direction of travel, and the project/point round trip agrees
-      const out = { x: 0, y: 0, ux: 0, uy: 0, len: 0 };
-      for (const [p, q] of [
-        [a, b],
-        [b, a],
-      ]) {
-        const s = r.len * 0.4;
-        city.edgePoint(p, q, s, 0, out);
-        const cx = out.x,
-          cy = out.y;
-        city.edgePoint(p, q, s, 2, out);
-        expect((out.x - cx) * -out.uy + (out.y - cy) * out.ux).toBeGreaterThan(
-          1.9,
-        );
-        expect(city.edgeProject(p, q, cx, cy)).toBeCloseTo(s, 0);
-      }
-    }
-  });
-
-  it("a lane driver follows a whole winding road without leaving the asphalt", () => {
-    const r = roads.reduce(
-      (best, c) => (c.len > best.len ? c : best),
-      roads[0],
-    );
-    const [a, b] = nodes(r);
+  it("a lane driver follows a whole bend without leaving the asphalt", () => {
+    const t = city.tiles[4];
+    const sb = t.supers.find((s) => s.kind === "bend")!;
+    const r = sb.arcs[0];
+    const a = nodeOf(t, r.ai, r.aj),
+      b = nodeOf(t, r.bi, r.bj);
     Phys.init({ buildings: [], walls: [] });
     const car = new Car(TRAFFIC_CARS[0], "civil");
     Phys.addCar(car);
@@ -1546,14 +1584,285 @@ describe("winding roads", () => {
       expect(city.surfaceAt(car.x, car.y).kind).not.toBe("grass");
       steps++;
     }
-    expect(drv.a).not.toBe(a); // it reached the far end and moved on to the next edge
+    expect(drv.a).not.toBe(a); // it reached the far end and moved on
     expect(steps).toBeLessThan(60 * 40);
+  });
+});
+
+describe("right of way and roundabouts", () => {
+  let city = World.build(0, 0, 1);
+  beforeEach(() => {
+    World.init();
+    city = World.build(0, 0, 1);
+    Traffic.clearHolds();
+    Phys.init({ buildings: [], walls: [] });
+  });
+
+  /** a plain 4-way crossing near the middle of the window (not in a bend or roundabout park) */
+  const crossing = (): number => {
+    for (let r = 0; r < 12; r++) {
+      for (const [di, dj] of [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+        [1, 1],
+        [-1, -1],
+      ]) {
+        const i = 24 + r * 2 + di,
+          j = 24 + dj;
+        const id = city.nodeId(i, j);
+        if (
+          city.neighbors(id).length === 4 &&
+          !city.roundAt(id) &&
+          city.vt[i] !== "alley" &&
+          city.ht[j] !== "alley" &&
+          i % 16 &&
+          j % 16
+        )
+          if (city.neighbors(id).every((m) => !city.isCurve(id, m))) return id;
+      }
+    }
+    throw new Error("no plain crossing found");
+  };
+
+  const mkCar = (_id: number, from: number, to: number, toEnd: number): Car => {
+    const car = new Car(TRAFFIC_CARS[0], "civil");
+    Phys.addCar(car);
+    const len = city.edgeLength(from, to);
+    const p = city.lanePoint(from, to, 1 - toEnd / len);
+    car.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+    car.setSpeed(5);
+    return car;
+  };
+
+  it("two cars arriving on crossing paths are never granted the junction together; the second goes once the first is clear", () => {
+    const n = crossing();
+    const nb = city.neighbors(n);
+    const west = nb.find((m) => city.nodeX(m) < city.nodeX(n))!,
+      east = nb.find((m) => city.nodeX(m) > city.nodeX(n))!,
+      north = nb.find((m) => city.nodeY(m) < city.nodeY(n))!,
+      south = nb.find((m) => city.nodeY(m) > city.nodeY(n))!;
+    const carA = mkCar(1, west, n, 12),
+      carB = mkCar(2, north, n, 12);
+    const A = new LaneDriver(city, west, n),
+      B = new LaneDriver(city, north, n);
+    A.next = east; // straight on
+    B.next = south; // straight on, across A
+    carGrid.rebuild([carA, carB]);
+    A.control(carA, 1 / 60);
+    B.control(carB, 1 / 60);
+    const granted = () => Traffic.holdsAt(n).filter((h) => h.granted).length;
+    expect(Traffic.holdsAt(n)).toHaveLength(2);
+    expect(granted()).toBe(1); // exactly one of them may enter
+    // the waiting car is braking for the line, the other is free
+    const waiter = A.hold!.granted ? B : A;
+    const goer = A.hold!.granted ? A : B;
+    expect(waiter.hold!.granted).toBe(false);
+    // a few more ticks: still only one
+    for (let k = 0; k < 30; k++) {
+      Traffic.advance(1 / 60);
+      A.control(carA, 1 / 60);
+      B.control(carB, 1 / 60);
+      expect(granted()).toBe(1);
+    }
+    // the first car is through: move it 25 m into its exit road, then the other is let in
+    const goerCar = goer === A ? carA : carB;
+    const out = goer === A ? east : south;
+    const p = city.edgePoint(n, out, 25, city.laneOffset(n, out), {
+      x: 0,
+      y: 0,
+      ux: 0,
+      uy: 0,
+      len: 0,
+    });
+    goerCar.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+    goerCar.setSpeed(8);
+    goer.a = n;
+    goer.b = out;
+    goer.next = -1;
+    for (let k = 0; k < 10; k++) {
+      Traffic.advance(1 / 60);
+      carGrid.rebuild([carA, carB]);
+      goer.control(goerCar, 1 / 60);
+      waiter.control(waiter === A ? carA : carB, 1 / 60);
+    }
+    expect(waiter.hold!.granted).toBe(true);
+    expect(goer.hold).toBeNull();
+  });
+
+  it("opposite straight-through cars share a junction, a left turn across oncoming traffic does not", () => {
+    const n = crossing();
+    const nb = city.neighbors(n);
+    const west = nb.find((m) => city.nodeX(m) < city.nodeX(n))!,
+      east = nb.find((m) => city.nodeX(m) > city.nodeX(n))!,
+      south = nb.find((m) => city.nodeY(m) > city.nodeY(n))!;
+    const cars = [mkCar(1, west, n, 12), mkCar(2, east, n, 12)];
+    const A = new LaneDriver(city, west, n),
+      B = new LaneDriver(city, east, n);
+    A.next = east;
+    B.next = west;
+    carGrid.rebuild(cars);
+    A.control(cars[0], 1 / 60);
+    B.control(cars[1], 1 / 60);
+    expect(Traffic.holdsAt(n).filter((h) => h.granted)).toHaveLength(2);
+    Traffic.clearHolds();
+    // now B turns left across A's path (arriving from the east, turning south)
+    const B2 = new LaneDriver(city, east, n);
+    B2.next = south;
+    const A2 = new LaneDriver(city, west, n);
+    A2.next = east;
+    A2.control(cars[0], 1 / 60);
+    B2.control(cars[1], 1 / 60);
+    expect(Traffic.holdsAt(n).filter((h) => h.granted)).toHaveLength(1);
+  });
+
+  it("a car enters a roundabout, goes round it and leaves by the arm it chose, on the asphalt", () => {
+    const t = city.tiles[4];
+    const sb = t.supers.find((s) => s.kind === "round")!;
+    const idOf = (i: number, j: number) => city.nodeId(TILE + i, TILE + j);
+    const C = idOf(sb.ci, sb.cj);
+    const from = idOf(sb.ci - 1, sb.cj), // the west arm, heading east
+      exit = idOf(sb.ci, sb.cj - 1); // out by the north arm: a left turn, almost all the way round
+    expect(city.roundAt(C)).toBeDefined();
+    const car = new Car(TRAFFIC_CARS[0], "civil");
+    Phys.addCar(car);
+    const p = city.lanePoint(from, C, 0.8);
+    car.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+    car.setSpeed(6);
+    const drv = new LaneDriver(city, from, C);
+    drv.next = exit;
+    let steps = 0,
+      sawRing = false;
+    while (!(drv.a === C && drv.b === exit) && steps < 60 * 60) {
+      Traffic.advance(1 / 60);
+      carGrid.rebuild([car]);
+      drv.control(car, 1 / 60);
+      if (drv.ring) sawRing = true;
+      car.applyControls(1 / 60, city.surfaceAt(car.x, car.y));
+      Phys.step(1 / 60);
+      car.readBack();
+      expect(city.surfaceAt(car.x, car.y).kind).not.toBe("sidewalk");
+      steps++;
+    }
+    expect(sawRing).toBe(true);
+    expect(drv.b).toBe(exit);
+    // it ends up on the north arm, heading north
+    expect(car.y).toBeLessThan(sb.cy);
+    expect(Math.abs(car.x - sb.cx)).toBeLessThan(8);
+    expect(steps).toBeLessThan(60 * 40);
+  });
+
+  it("a car waits for a car already on the ring before it enters", () => {
+    const t = city.tiles[4];
+    const sb = t.supers.find((s) => s.kind === "round")!;
+    const idOf = (i: number, j: number) => city.nodeId(TILE + i, TILE + j);
+    const C = idOf(sb.ci, sb.cj),
+      from = idOf(sb.ci - 1, sb.cj);
+    const rc = (sb.ri + sb.ro) / 2;
+    const me = new Car(TRAFFIC_CARS[0], "civil"),
+      ring = new Car(TRAFFIC_CARS[1], "civil");
+    Phys.addCar(me);
+    Phys.addCar(ring);
+    const p = city.lanePoint(
+      from,
+      C,
+      1 - (sb.ro + 2) / city.edgeLength(from, C),
+    );
+    me.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+    me.setSpeed(1);
+    // a car on the circle just upstream of our entry point (it will pass in front of us)
+    const phi = Math.atan2(me.y - sb.cy, me.x - sb.cx) + 0.5;
+    ring.place(
+      sb.cx + Math.cos(phi) * rc,
+      sb.cy + Math.sin(phi) * rc,
+      phi - Math.PI / 2,
+    );
+    ring.setSpeed(5);
+    const drv = new LaneDriver(city, from, C);
+    drv.next = idOf(sb.ci + 1, sb.cj);
+    carGrid.rebuild([me, ring]);
+    drv.control(me, 1 / 60);
+    expect(drv.ring).toBeNull(); // it holds at the line
+    ring.place(sb.cx - rc, sb.cy + 40, 0); // the ring is clear again
+    carGrid.rebuild([me, ring]);
+    me.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+    drv.control(me, 1 / 60);
+    expect(drv.ring).not.toBeNull();
+  });
+
+  it("80 civilians packed into 330 m of town (the game's own density) drive for 90 seconds without a single civilian-civilian collision, and nobody sits stuck", () => {
+    const rnd = (() => {
+      let s = 12345;
+      return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    })();
+    const centre = {
+      x: city.nodeX(city.centerNode()),
+      y: city.nodeY(city.centerNode()),
+    };
+    const cars: Car[] = [],
+      drivers: LaneDriver[] = [];
+    for (let tries = 0; tries < 4000 && cars.length < 80; tries++) {
+      const n = city.nodeId(
+        (24 - 5 + rnd() * 10) | 0,
+        (24 - 5 + rnd() * 10) | 0,
+      );
+      if (
+        city.isDead(n) ||
+        Math.hypot(city.nodeX(n) - centre.x, city.nodeY(n) - centre.y) > 700
+      )
+        continue;
+      const nb = city.neighbors(n);
+      if (!nb.length) continue;
+      const to = nb[(rnd() * nb.length) | 0];
+      const p = city.lanePoint(n, to, 0.2 + rnd() * 0.5);
+      if (cars.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 14)) continue;
+      const car = new Car(
+        TRAFFIC_CARS[cars.length % TRAFFIC_CARS.length],
+        "civil",
+      );
+      Phys.addCar(car);
+      car.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+      car.setSpeed(6);
+      const d = new LaneDriver(city, n, to);
+      d.speedCap = 9 + rnd() * 6;
+      cars.push(car);
+      drivers.push(d);
+    }
+    expect(cars.length).toBeGreaterThan(40);
+    let crashes = 0;
+    const was = game.onImpact;
+    game.onImpact = (a, b) => {
+      if (a && b && a.kind === "civil" && b.kind === "civil") crashes++;
+    };
+    const stuckFor = new Array(cars.length).fill(0);
+    let worstStuck = 0;
+    for (let step = 0; step < 90 * 60; step++) {
+      Traffic.advance(1 / 60);
+      carGrid.rebuild(cars);
+      for (let i = 0; i < cars.length; i++) drivers[i].control(cars[i], 1 / 60);
+      for (const c of cars) c.applyControls(1 / 60, city.surfaceAt(c.x, c.y));
+      Phys.step(1 / 60);
+      for (const c of cars) c.readBack();
+      for (let i = 0; i < cars.length; i++) {
+        stuckFor[i] = cars[i].speed < 0.5 ? stuckFor[i] + 1 / 60 : 0;
+        worstStuck = Math.max(worstStuck, stuckFor[i]);
+      }
+    }
+    game.onImpact = was;
+    expect(crashes).toBe(0);
+    expect(worstStuck).toBeLessThan(25);
   });
 });
 
 describe("no escaping in a straight line", () => {
   /** drive the player at 50 m/s for `secs`, turning by `turn` radians every `every` seconds, with no cops around */
-  function drive(secs: number, turn: number, every: number): ReturnType<typeof vi.fn> {
+  function drive(
+    secs: number,
+    turn: number,
+    every: number,
+  ): ReturnType<typeof vi.fn> {
     World.init();
     const city = World.build(0, 0, 1);
     game.city = city;
@@ -1568,7 +1877,12 @@ describe("no escaping in a straight line", () => {
     heat.start("TEST");
     let heading = 0;
     for (let t = 0; t < secs; t += 0.1) {
-      if (turn && Math.floor(t / every) !== Math.floor((t - 0.1) / every) && t > 0) heading += turn;
+      if (
+        turn &&
+        Math.floor(t / every) !== Math.floor((t - 0.1) / every) &&
+        t > 0
+      )
+        heading += turn;
       car.theta = heading;
       car.speed = 50;
       car.wvx = Math.cos(heading) * 50;
