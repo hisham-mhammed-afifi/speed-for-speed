@@ -197,7 +197,7 @@ export interface Block {
   y0: number
   x1: number
   y1: number
-  type: 'build' | 'park' | 'plaza' | 'water' | 'square' | 'sand'
+  type: 'build' | 'park' | 'plaza' | 'water' | 'sand'
   district: BlockDistrict
   /** photo landmark lots on this block, at real-world size (see world/worldArt.ts) */
   lots?: LotPlacement[]
@@ -205,8 +205,8 @@ export interface Block {
   rest?: Rect[]
   /** this block is one quarter of a bend or roundabout superblock (see SuperBlock) */
   sb?: SuperBlock
-  /** a city square: paved, with a fountain and a statue (k = which statue) at its centre */
-  square?: { cx: number; cy: number; k: number }
+  /** this block's corner at a statue square's crossing is paved plaza (the crossing's centre and the ring's outer radius are kept for drawing) */
+  corner?: Rect & { cx: number; cy: number; ro: number }
 }
 
 /**
@@ -217,7 +217,7 @@ export interface Block {
 export interface SuperBlock {
   i: number
   j: number
-  kind: 'bend' | 'round'
+  kind: 'bend' | 'round' | 'square'
   x0: number
   y0: number
   x1: number
@@ -230,6 +230,8 @@ export interface SuperBlock {
   ri: number
   ro: number
   arcs: BlockRoad[]
+  /** squares only: which statue stands on the island */
+  k?: number
 }
 
 export type LotId = 'villa' | 'campus' | 'residence'

@@ -84,7 +84,8 @@ function tracePath(ctx: CanvasRenderingContext2D, r: BlockRoad, s0: number, s1: 
 
 /** The bend parks (lawn over the removed streets) and the roundabouts (circle, lane line, grass island) of a tile. */
 function drawSupers(ctx: CanvasRenderingContext2D, t: Tile, vis: Visible): void {
-  for (const sb of t.supers) {
+  for (let pass = 0; pass < 2; pass++)
+  for (const sb of pass ? t.squares : t.supers) {
     if (sb.x1 < vis.x0 || sb.x0 > vis.x1 || sb.y1 < vis.y0 || sb.y0 > vis.y1) continue;
     if (sb.kind === "bend") {
       ctx.fillStyle = pat.sidewalk;
@@ -124,7 +125,7 @@ function drawSupers(ctx: CanvasRenderingContext2D, t: Tile, vis: Visible): void 
     ctx.beginPath();
     ctx.arc(sb.cx, sb.cy, sb.ri + 1.2, 0, 6.2832);
     ctx.fill();
-    ctx.fillStyle = pat.grass;
+    ctx.fillStyle = sb.kind === "square" ? pat.plaza : pat.grass;
     ctx.beginPath();
     ctx.arc(sb.cx, sb.cy, sb.ri, 0, 6.2832);
     ctx.fill();
@@ -192,19 +193,18 @@ function drawGround(
             ? pat.lawn
             : bl.district === "port"
               ? pat.port
-              : bl.type === "plaza" || bl.type === "square"
+              : bl.type === "plaza"
                 ? pat.plaza
                 : pat.lot;
       if (bl.type === "sand") ctx.fillStyle = pat.sand;
-      else if (bl.type === "square") ctx.fillStyle = pat.plaza;
       ctx.fillRect(bl.x0 + 3, bl.y0 + 3, bl.x1 - bl.x0 - 6, bl.y1 - bl.y0 - 6);
       if (bl.lots) for (const lot of bl.lots) drawLot(ctx, lot);
-      if (bl.square) drawSquarePaving(ctx, bl);
+      if (bl.corner) drawCorner(ctx, bl.corner);
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
       ctx.lineWidth = 0.3;
       ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0);
     }
-    if (t.supers.length) drawSupers(ctx, t, vis);
+    if (t.supers.length || t.squares.length) drawSupers(ctx, t, vis);
     if (t.curves.length) drawCurves(ctx, t, vis);
   }
   // the rivers, with bridge decks (rails on both sides) where the bridge streets cross them
@@ -754,22 +754,25 @@ function animateWater(t: number): void {
   }
 }
 
-/** the paving of a city square: stone rings and four paths out from the fountain */
-function drawSquarePaving(ctx: CanvasRenderingContext2D, bl: Block): void {
-  const sq = bl.square!;
+/** a paved plaza corner of a statue square: the plaza stone, with two paving rings round the crossing, clipped to the corner */
+function drawCorner(ctx: CanvasRenderingContext2D, c: NonNullable<Block["corner"]>): void {
+  ctx.fillStyle = pat.plaza;
+  ctx.fillRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
   ctx.save();
-  ctx.strokeStyle = "rgba(60,62,68,0.35)";
+  ctx.beginPath();
+  ctx.rect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
+  ctx.clip();
+  ctx.strokeStyle = "rgba(60,62,68,0.4)";
   ctx.lineWidth = 0.35;
-  for (const r of [8.5, 12.5, 16.5]) {
+  for (const r of [c.ro + 2.5, c.ro + 7.5]) {
     ctx.beginPath();
-    ctx.arc(sq.cx, sq.cy, r, 0, TAU);
+    ctx.arc(c.cx, c.cy, r, 0, TAU);
     ctx.stroke();
   }
-  ctx.fillStyle = "rgba(230,232,236,0.14)";
-  const reach = Math.min(bl.x1 - bl.x0, bl.y1 - bl.y0) / 2 - 3;
-  ctx.fillRect(sq.cx - 1.6, sq.cy - reach, 3.2, reach * 2);
-  ctx.fillRect(sq.cx - reach, sq.cy - 1.6, reach * 2, 3.2);
   ctx.restore();
+  ctx.strokeStyle = "rgba(0,0,0,0.3)";
+  ctx.lineWidth = 0.3;
+  ctx.strokeRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
 }
 
 /** a rocky hill: stacked, shrinking, lighter layers of the mountain texture, leaning with the camera like a building roof */
@@ -818,24 +821,25 @@ function drawStatue(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Came
     cy = b.y,
     t = game.time;
   const k = b.art ?? 0;
+  const R = Math.min(6.1, b.hx + 1.6) // the basin, inside the island
   ctx.fillStyle = "#858890";
   ctx.beginPath();
-  ctx.arc(cx, cy, 6.1, 0, TAU);
+  ctx.arc(cx, cy, R, 0, TAU);
   ctx.fill();
   ctx.fillStyle = "#4f525a";
   ctx.beginPath();
-  ctx.arc(cx, cy, 5.5, 0, TAU);
+  ctx.arc(cx, cy, R - 0.6, 0, TAU);
   ctx.fill();
   ctx.fillStyle = pat.water;
   ctx.beginPath();
-  ctx.arc(cx, cy, 5.2, 0, TAU);
+  ctx.arc(cx, cy, R - 0.9, 0, TAU);
   ctx.fill();
   for (let q = 0; q < 3; q++) {
     const ph = (t * 0.3 + q / 3) % 1;
     ctx.strokeStyle = `rgba(225,242,255,${0.4 * (1 - ph)})`;
     ctx.lineWidth = 0.22;
     ctx.beginPath();
-    ctx.arc(cx, cy, 1.9 + ph * 3.2, 0, TAU);
+    ctx.arc(cx, cy, (1.9 + ph * 3.2) * (R / 6.1), 0, TAU);
     ctx.stroke();
   }
   // the shadow of pedestal and statue, thrown towards the bottom right like the buildings'

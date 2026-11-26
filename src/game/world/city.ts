@@ -163,6 +163,8 @@ export interface Tile {
   curves: BlockRoad[]
   /** the tile's bend and roundabout parks */
   supers: SuperBlock[]
+  /** the statue squares of the tile: roundabouts at crossings, with paved corners (see tile.ts) */
+  squares: SuperBlock[]
   riverCol: number
   bridgeRows: number[]
   statics: StaticRec[]

@@ -89,6 +89,8 @@ export class LaneDriver {
   next = -1
   speedCap = 12
   stuck = 0
+  /** seconds motionless although this driver has the right of way (junction booked, in the junction, on a ring): see unblock() */
+  waitT = 0
   turnSlow = false
   /** a siren is close: hug the kerb and slow right down */
   pullOver = false
@@ -318,7 +320,7 @@ export class LaneDriver {
       }
       const k = Math.min(n, i + Math.max(1, Math.ceil((3 + car.speed * 0.4) / this.connStep)))
       steerTo(car, this.connX[k], this.connY[k])
-      const target = capForTraffic(car, Math.min(this.speedCap, 7), undefined, this.connX[k] - car.x, this.connY[k] - car.y)
+      const target = this.unblock(car, dt, capForTraffic(car, Math.min(this.speedCap, 7), undefined, this.connX[k] - car.x, this.connY[k] - car.y), true)
       speedTo(car, target)
       if (car.speed < 0.6 && target > 2) this.stuck += dt
       else this.stuck = Math.max(0, this.stuck - dt * 2)
@@ -328,10 +330,33 @@ export class LaneDriver {
     steerTo(car, r.cx + Math.cos(phi - la) * r.rc, r.cy + Math.sin(phi - la) * r.rc)
     const rtx = r.cx + Math.cos(phi - la) * r.rc,
       rty = r.cy + Math.sin(phi - la) * r.rc
-    const target = capForTraffic(car, Math.min(this.speedCap, 7), undefined, rtx - car.x, rty - car.y)
+    const target = this.unblock(car, dt, capForTraffic(car, Math.min(this.speedCap, 7), undefined, rtx - car.x, rty - car.y), true)
     speedTo(car, target)
     if (car.speed < 0.6 && target > 2) this.stuck += dt
     else this.stuck = Math.max(0, this.stuck - dt * 2)
+  }
+
+  /**
+   * A standoff breaker. A car that holds the right of way (its junction is booked, it is inside it, or it is on a ring) but has not moved for 4 s is
+   * almost always boxed in by a car waiting beside its path, which in turn waits for us. Creep on at walking pace unless something is right in front.
+   */
+  private unblock(car: Car, dt: number, target: number, entitled: boolean): number {
+    if (entitled && car.speed < 0.3) this.waitT += dt
+    else this.waitT = Math.max(0, this.waitT - dt * 2)
+    if (this.waitT < 4 || target >= 1.8) return target
+    const fx = Math.cos(car.theta),
+      fy = Math.sin(car.theta)
+    const near = carGrid.query(car.x + fx * 4, car.y + fy * 4, 7, nearScratch)
+    for (let i = 0; i < near.length; i++) {
+      const o = near[i]
+      if (o === car) continue
+      const dx = o.x - car.x,
+        dy = o.y - car.y
+      const ahead = dx * fx + dy * fy,
+        side = dx * -fy + dy * fx
+      if (ahead > 0 && ahead < car.hx + o.hx + 1.6 && Math.abs(side) < car.hy + o.hy + 0.3) return target // really in the way: wait
+    }
+    return 1.8
   }
 
   control(car: Car, dt: number): void {
@@ -399,7 +424,7 @@ export class LaneDriver {
     const lane = city.laneOffset(this.a, this.b)
     // pulling over means into the parking strip / shoulder, not the middle of the road
     // a lorry swings wider than a car as it straightens up after a turn, so it keeps a little closer to its own kerb
-    const kerb = car.spec.truck && w >= 10 && w < 28 ? 0.45 : 0
+    const kerb = car.spec.truck && w >= 10 && w < 28 ? 0.9 : 0
     const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge + kerb + (w >= 28 ? this.hwyLane : 0)
     const la = clamp(6 + car.speed * 0.55, 7, 20)
     const tt = Math.min(Math.max(t, 0) + la, len)
@@ -437,7 +462,7 @@ export class LaneDriver {
         }
       }
     }
-    target = capForTraffic(car, target, undefined, aimX - car.x, aimY - car.y)
+    target = this.unblock(car, dt, capForTraffic(car, target, undefined, aimX - car.x, aimY - car.y), inConn || (this.hold !== null && this.hold.granted))
     speedTo(car, target)
     avoid(car, city)
     // stuck detection

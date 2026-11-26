@@ -1,4 +1,4 @@
-import { clamp, hyp } from '../core/math'
+import { clamp, hyp, wrapAngle } from '../core/math'
 import { avoid, speedTo, steerTo } from './drive'
 import { Difficulty } from './difficulty'
 import { Memory } from './memory'
@@ -24,6 +24,50 @@ function aimOnCurve(city: City, path: number[], pi: number, car: Car): boolean {
   const s = city.edgeProject(a, b, car.x, car.y)
   city.edgePoint(a, b, Math.min(s + 9 + car.speed * 0.6, city.edgeLength(a, b)), 0, aim)
   return true
+}
+
+/**
+ * Cops steer at node centres, which at a roundabout or a statue square is the middle of the island. Near one, aim at a point on the ring lane instead
+ * and go round (the shorter way, and with the traffic when it makes no difference) until the exit arm is straight ahead. Writes the point to `out`.
+ * `path[pi]` is the node the cop is heading for; the roundabout may be that node (still approaching) or the one just before it (already on the ring).
+ */
+export function ringAim(city: City, path: number[], pi: number, car: Car, out: { x: number; y: number }): boolean {
+  for (let m = pi - 1; m <= pi; m++) {
+    if (m < 0 || m >= path.length - 1) continue
+    const rd = city.roundAt(path[m])
+    if (!rd) continue
+    const dx = car.x - rd.cx,
+      dy = car.y - rd.cy
+    const d = hyp(dx, dy)
+    if (d > rd.ro + 10) continue
+    const e = path[m + 1]
+    const phiCar = Math.atan2(dy, dx),
+      phiExit = Math.atan2(city.nodeY(e) - rd.cy, city.nodeX(e) - rd.cx)
+    const delta = wrapAngle(phiExit - phiCar)
+    if (Math.abs(delta) < 0.45 && d < rd.ro + 2) return false // on the ring with the exit arm straight ahead: leave by it
+    const dir = Math.abs(Math.abs(delta) - Math.PI) < 0.25 ? -1 : Math.sign(delta) || -1 // straight across: with the traffic (counter-clockwise on screen)
+    const step = Math.min(Math.max(Math.abs(delta), 0.5), 0.9) // (a U-turn still has to go round)
+    const phi = phiCar + dir * step
+    out.x = rd.cx + Math.cos(phi) * rd.rc
+    out.y = rd.cy + Math.sin(phi) * rd.rc
+    return true
+  }
+  return false
+}
+
+/**
+ * How fast a cop may go with a roundabout (or a statue square) ahead: the ring is a tight circle (v squared over its radius must stay within grip),
+ * so brake early enough to be at ring speed when the ring starts. Infinity when no roundabout is near the path.
+ */
+export function ringSpeed(city: City, path: number[], pi: number, car: Car): number {
+  let v = Infinity
+  for (let m = Math.max(0, pi - 1); m <= pi + 1 && m < path.length; m++) {
+    const rd = city.roundAt(path[m])
+    if (!rd) continue
+    const d = hyp(city.nodeX(path[m]) - car.x, city.nodeY(path[m]) - car.y)
+    v = Math.min(v, Math.sqrt(10 * 10 + 2 * 9 * Math.max(d - rd.ro, 0)))
+  }
+  return v
 }
 
 export type PoliceState = 'patrol' | 'pursue' | 'intercept' | 'block' | 'wrecked'
@@ -353,7 +397,12 @@ export const Police = {
         tx = aim.x
         ty = aim.y
         tspeed = Math.min(tspeed, 24) // ease through the bend
+      } else if (ringAim(city, path, u.pi, car, aim)) {
+        tx = aim.x
+        ty = aim.y
+        tspeed = Math.min(tspeed, 22) // round the island, not over it
       }
+      tspeed = Math.min(tspeed, ringSpeed(city, path, u.pi, car))
     }
     steerTo(car, tx, ty)
     speedTo(car, tspeed)
@@ -444,7 +493,12 @@ export const Police = {
         tx = aim.x
         ty = aim.y
         tspeed = Math.min(tspeed, 24)
+      } else if (ringAim(city, path, u.pi, car, aim)) {
+        tx = aim.x
+        ty = aim.y
+        tspeed = Math.min(tspeed, 22)
       }
+      tspeed = Math.min(tspeed, ringSpeed(city, path, u.pi, car))
     } else {
       tx = ic.wx
       ty = ic.wy

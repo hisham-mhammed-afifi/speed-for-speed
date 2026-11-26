@@ -36,15 +36,13 @@ function tileMap(t: Tile): HTMLCanvasElement {
         ? '#25472c'
         : bl.type === 'plaza'
           ? '#3a3e45'
-          : bl.type === 'square'
-            ? '#5a5f68'
-            : bl.type === 'sand'
-              ? '#8a7548'
-              : tint[bl.district]
+          : bl.type === 'sand'
+            ? '#8a7548'
+            : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
   // bend parks (lawn over the removed streets) and roundabouts
-  for (const sb of t.supers) {
+  for (const sb of t.supers.concat(t.squares)) {
     if (sb.kind === 'bend') {
       x.fillStyle = '#25472c'
       x.fillRect(sb.x0, sb.y0, sb.x1 - sb.x0, sb.y1 - sb.y0)
@@ -53,7 +51,7 @@ function tileMap(t: Tile): HTMLCanvasElement {
       x.beginPath()
       x.arc(sb.cx, sb.cy, sb.ro, 0, 6.2832)
       x.fill()
-      x.fillStyle = '#25472c'
+      x.fillStyle = sb.kind === 'square' ? '#9a9da6' : '#25472c'
       x.beginPath()
       x.arc(sb.cx, sb.cy, sb.ri, 0, 6.2832)
       x.fill()

@@ -19,6 +19,7 @@ import { Combo } from './progress/combo'
 import { ensureDaily, trackDaily } from './progress/daily'
 import type { StatKey } from './progress/daily'
 import { applyUpgrades, buyCar, buyUpgrade, levelsOf, owns } from './progress/economy'
+import { bikeThrown, COMBO_BREAK_DV, healthAfterHit, LIGHT_BUMP_DV, repair } from './physics/damage'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
@@ -36,8 +37,8 @@ import type { CameraMode } from './render/camera'
 
 const store = () => useGameStore.getState()
 
-/** change of speed (m/s, about 58 km/h) in one crash that throws a motorcycle rider off */
-const BIKE_THROW_DV = 16
+/** change of speed (m/s, about 58 km/h) that stops a civilian's motorcycle dead (the player's rules are in physics/damage.ts) */
+const CIVIL_BIKE_DOWN_DV = 16
 
 /**
  * Owns the canvas, the fixed-step loop and the game flow (start, pause, results).
@@ -65,6 +66,7 @@ class GameEngine {
   private carIndex = 0
   private saveData: SaveData = loadSave()
   private saveDirty = false
+  private repairing = false
   private saveT = 0
   private params = new URLSearchParams()
   private assets: Promise<void> | null = null
@@ -201,6 +203,13 @@ class GameEngine {
       // short per-car cooldown so one crash (contact, bounce, re-contact) only damages once
       const hurt = (car: Car | null, dv: number) => {
         if (!car || dv <= 3 || game.time - car.lastHit < 0.25) return
+        if (car === game.player?.car) {
+          // the player's car is looked after: light bumps are free, free roam can't wreck it, and it repairs itself (physics/damage.ts)
+          if (dv < LIGHT_BUMP_DV) return
+          car.lastHit = game.time
+          car.health = healthAfterHit(car.health, dv, car.spec.durability, heat.active)
+          return
+        }
         car.lastHit = game.time
         car.health = Math.max(0, car.health - ((dv - 3) * 2.2) / car.spec.durability)
       }
@@ -208,7 +217,7 @@ class GameEngine {
       hurt(b, dvB)
       // a hard crash throws a motorcycle's rider; other road users' bikes just stop dead
       const down = (car: Car | null, dv: number) => {
-        if (!car || !car.spec.bike || car.kind !== 'civil' || dv < BIKE_THROW_DV) return
+        if (!car || !car.spec.bike || car.kind !== 'civil' || dv < CIVIL_BIKE_DOWN_DV) return
         car.health = 0
         const u = game.civs.find((c) => c.car === car)
         if (u) u.driver.speedCap = 0
@@ -221,8 +230,8 @@ class GameEngine {
         if (dv > 2) camera.addShake(Math.min(0.9, dv / 20))
         const other = a === pl ? b : a
         if (dv > 0.5) Combo.markHit(other)
-        if (dv > 3) Combo.lose()
-        if (pl.spec.bike && dv >= BIKE_THROW_DV) {
+        if (dv > COMBO_BREAK_DV) Combo.lose()
+        if (pl.spec.bike && bikeThrown(dv, heat.active)) {
           camera.addShake(1)
           game.toast('THROWN OFF THE BIKE', '#ff4d4d')
           game.endRun('wrecked')
@@ -247,6 +256,7 @@ class GameEngine {
     this.saveData.car = idx
     ensureDaily(this.saveData)
     Combo.reset()
+    this.repairing = false
     writeSave(this.saveData)
     store().setSave({ ...this.saveData })
     store().setSelectedCar(idx)
@@ -615,6 +625,15 @@ class GameEngine {
     Police.update(dt)
     heat.update(dt)
     Combo.update(dt, pl)
+    // the car repairs itself after a quiet spell
+    if (pl.health < 100) {
+      const before = pl.health
+      pl.health = repair(before, game.time - pl.lastHit, dt, heat.active)
+      if (pl.health > before && !this.repairing && before < 85) {
+        this.repairing = true
+        game.toast('REPAIRING', '#7be08a')
+      }
+    } else this.repairing = false
     this.saveT += dt
     if (this.saveDirty && this.saveT > 5) this.flushSave()
     for (let i = 0; i < game.cars.length; i++) {

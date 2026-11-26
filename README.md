@@ -183,14 +183,37 @@ Three photo textures (`public/world/textures/`: sea, sand, rock) are made seamle
   bike barely notices it).
 - **Rocky hills**: about 4 in 10 roomy plain parks get one or two outcrops (`BuildingKind` `'rock'`), drawn as stacked, shrinking layers of the rock texture
   that lean with the camera like a roof. They are real obstacles (collider, line of sight) and no tree grows out of one.
-- **Statue squares**: every town has exactly three (`type: 'square'`; the home town's are the three nearest the start). A square is a paved block with
-  rings and paths, four corner trees, and a stone fountain basin (moving water) around a pedestal and a statue (`'statue'` building, a 12 m collider).
+- **Statue squares**: every town has exactly three, each ON a crossing of two streets or avenues (`Tile.squares`, a `SuperBlock` of kind `'square'`; the
+  home town's are the three nearest the start). A square is a roundabout (traffic gives way and circles it like any other, `city.roundAt`) whose island is
+  paved and carries a stone fountain basin (moving water), a pedestal and the statue (a `'statue'` building, a collider inside the island). The four blocks
+  around the crossing each get a 24 m paved plaza corner (`Block.corner`) with a tree, and no buildings on it (`rest` strips take over the rest of the block).
+  Squares are at least 3 crossings apart and never beside a bend, a roundabout, the river, an alley or a highway.
   Until the artist's pictures exist the statue is a drawn bronze figure, obelisk or globe. To use pictures: drop `statue-1.jpg` .. `statue-3.jpg`
   (top view, white background) in the art folder, run `--only statues`, and list the three `world/statues/sN.webp` files in `STATUE_FILES`
   (`world/worldArt.ts`).
+  Cops steer round the island, not over it (`ringAim`, `ringSpeed` in `ai/police.ts`: they brake for the ring and take it the shorter way).
 - All of this is generated on its own random stream (`seed ^ 0x5a1e5`), so the rest of a town doesn't depend on it.
 
+## Damage (forgiving on purpose)
+Players left because every bump cost health and a wreck lost the bounty, so the rules for the player's car are in `physics/damage.ts`:
+- a bump under 5 m/s costs nothing; above that `(dv - 5) * 1.2 / durability` (about half the old cost at town speeds, a head-on at 100+ km/h still hurts);
+- **free roam can never wreck you**: health stops at 25, and a car repairs itself (+6 per second after 2.5 s without a hit; +1.5 per second after 5 s in a
+  pursuit; a "REPAIRING" toast says so);
+- a motorcycle rider is thrown off only in a pursuit, at about 80 km/h or more; a combo survives anything lighter than 6 m/s;
+- cops and civilians keep the old harsher formula.
+Over the same reckless 150 s drive the old build wrecked the car after 5 crashes; the new one takes 28 crashes and ends at full health.
+
+Traffic has a standoff breaker (`LaneDriver.unblock`): a driver that holds the right of way but has not moved for 4 s creeps on at walking pace unless
+something is right in front of it, so two cars boxing each other in at a junction or ring sort themselves out.
+
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
-braking and reversing, and a wall crash.
+braking and reversing, and a wall crash. Three files:
+- `game.test.ts`: unit tests and small simulations (world generation, traffic rules, junctions and roundabouts, economy, combos, damage rules, and the
+  110-vehicle town simulation over six fixed random seeds).
+- `engine.test.ts`: the REAL engine, headless (`testkit.ts` boots `engine.ts` with a stub canvas and a scripted driver): three minutes of reckless driving
+  through the busy town in free roam must never wreck the car and it must repair itself; a pursuit's damage compared with the old rules; bikes, combos
+  and the repair toast through the real hooks.
+- `squares.test.ts`: the statue squares, geometry in 60+ towns, then cars (two models), all three lorries and a police car through every route of the
+  three home squares (hits on the statue, leaving the road, getting out), and 48 vehicles round them for 90 s.
 
 Deployed on Vercel: `vercel.json` runs `npm run build` and serves `dist/`.

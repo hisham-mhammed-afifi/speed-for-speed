@@ -297,7 +297,7 @@ export const World = {
     const rounds = new Map<number, { cx: number; cy: number; ri: number; ro: number; rc: number }>()
     for (let b = 0; b < n; b++)
       for (let a = 0; a < n; a++)
-        for (const sb of tiles[b * n + a].supers) {
+        for (const sb of tiles[b * n + a].supers.concat(tiles[b * n + a].squares)) {
           const id = (b * TILE + sb.cj) * NV + a * TILE + sb.ci
           if (sb.kind === 'bend') dead.add(id)
           else rounds.set(id, { cx: sb.cx, cy: sb.cy, ri: sb.ri, ro: sb.ro, rc: (sb.ri + sb.ro) / 2 })
@@ -305,7 +305,10 @@ export const World = {
     /** the bend or roundabout park containing (x, y), if any */
     const superAt = (x: number, y: number): SuperBlock | undefined => {
       const t = city.tileAt(x, y)
-      if (t) for (const sb of t.supers) if (x >= sb.x0 && x <= sb.x1 && y >= sb.y0 && y <= sb.y1) return sb
+      if (t) {
+        for (const sb of t.supers) if (x >= sb.x0 && x <= sb.x1 && y >= sb.y0 && y <= sb.y1) return sb
+        for (const sb of t.squares) if (x >= sb.x0 && x <= sb.x1 && y >= sb.y0 && y <= sb.y1) return sb
+      }
       return undefined
     }
 
@@ -428,9 +431,9 @@ export const World = {
         if (x < minX || x > maxX || y < minY || y > maxY) return SURF.lot
         const sb = superAt(x, y)
         if (sb) {
-          if (sb.kind === 'round') {
+          if (sb.kind === 'round' || sb.kind === 'square') {
             const d2 = (x - sb.cx) * (x - sb.cx) + (y - sb.cy) * (y - sb.cy)
-            if (d2 <= sb.ro * sb.ro) return d2 <= sb.ri * sb.ri ? SURF.grass : SURF.asphalt // the island, then the circle
+            if (d2 <= sb.ro * sb.ro) return d2 <= sb.ri * sb.ri ? (sb.kind === 'square' ? SURF.lot : SURF.grass) : SURF.asphalt // the island (paved for a square), then the circle
           } else {
             for (const a of sb.arcs) if (roadDist2(a, x, y) <= (a.w / 2) * (a.w / 2)) return SURF.asphalt
             // the removed inner streets are lawn again
@@ -446,6 +449,7 @@ export const World = {
         const b = blockAt(x, y)
         if (!b) return SURF.lot
         if (x < b.x0 + SIDEWALK || x > b.x1 - SIDEWALK || y < b.y0 + SIDEWALK || y > b.y1 - SIDEWALK) return SURF.sidewalk
+        if (b.corner && inRect(b.corner, x, y)) return SURF.lot
         if (b.type === 'sand') return SURF.sand
         return b.type === 'park' || b.district === 'suburbs' ? SURF.grass : SURF.lot
       },

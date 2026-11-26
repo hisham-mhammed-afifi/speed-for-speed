@@ -192,27 +192,68 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
   // ---------- decorations: three statue squares, a few sandy lots, rocky hills in the parks ----------
   // (their own random stream, like the lots and superblocks, so the rest of the town doesn't depend on them)
   const RD = rng(hash3(seed ^ 0x5a1e5, tx, ty))
+  const squares: SuperBlock[] = []
   {
     const nearRiver = (b: Block) => riverCol >= 0 && Math.abs(b.i - riverCol) <= 1
     const sized = (b: Block, lo: number, hi: number) => b.x1 - b.x0 >= lo && b.x1 - b.x0 <= hi && b.y1 - b.y0 >= lo && b.y1 - b.y0 <= hi
-    // the squares: roomy blocks, downtown first, well apart (in the home town, the ones nearest the start)
-    const cands = blocks.filter((b) => (b.type === 'build' || b.type === 'plaza') && !b.sb && !nearRiver(b) && sized(b, 55, 150))
-    const dist2 = (b: Block) => ((b.x0 + b.x1) / 2 - vx[8]) ** 2 + ((b.y0 + b.y1) / 2 - hy[8]) ** 2
-    const key = new Map<Block, number>(cands.map((b) => [b, home ? dist2(b) : (b.district === 'downtown' ? 0 : 0.6) + RD()]))
-    cands.sort((p, q) => key.get(p)! - key.get(q)!)
-    const chosen: Block[] = []
-    for (const gap of [4, 3, 2, 1, 0]) {
-      for (const b of cands) {
-        if (chosen.length >= 3) break
-        if (!chosen.includes(b) && chosen.every((c) => Math.max(Math.abs(c.i - b.i), Math.abs(c.j - b.j)) >= gap)) chosen.push(b)
+    // the statue squares sit ON crossings: a roundabout with a statue on its island, and a paved plaza corner in each of the four blocks around it.
+    // Three per town, well apart, never beside a bend, a roundabout or the river (in the home town: the three nearest the start).
+    const cand: { i: number; j: number; score: number }[] = []
+    for (let j = 2; j <= TILE - 2; j++)
+      for (let i = 2; i <= TILE - 2; i++) {
+        if (i === 8 && j === 8) continue // the spawn crossing
+        if (V.type[i] === 'alley' || H.type[j] === 'alley' || V.type[i] === 'highway' || H.type[j] === 'highway') continue
+        if (riverCol >= 0 && Math.abs(i - riverCol) <= 2) continue
+        let free = true
+        for (let dj = -1; dj <= 1 && free; dj++) for (let di = -1; di <= 1; di++) if (sbNodes.has((j + dj) * NV + i + di)) free = false
+        if (!free) continue
+        const around = [blocks[(j - 1) * TILE + i - 1], blocks[(j - 1) * TILE + i], blocks[j * TILE + i - 1], blocks[j * TILE + i]]
+        if (around.some((q) => q.sb || q.type === 'water')) continue
+        const score = home ? (vx[i] - vx[8]) ** 2 + (hy[j] - hy[8]) ** 2 : (nearestSeed(vx[i], hy[j]) === 'downtown' ? 0 : 0.6) + RD()
+        cand.push({ i, j, score })
+      }
+    cand.sort((p, q) => p.score - q.score)
+    const picked: { i: number; j: number }[] = []
+    for (const gap of [4, 3]) {
+      for (const c of cand) {
+        if (picked.length >= 3) break
+        if (picked.every((p) => Math.max(Math.abs(p.i - c.i), Math.abs(p.j - c.j)) >= gap)) picked.push(c)
       }
     }
-    chosen.forEach((b, k) => {
-      b.type = 'square'
-      b.square = { cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, k }
+    const CORNER = 24
+    picked.forEach(({ i, j }, k) => {
+      const ro = Math.max(vw[i], hw[j]) / 2 + 10
+      squares.push({ i: i - 1, j: j - 1, kind: 'square', x0: vx[i] - ro, x1: vx[i] + ro, y0: hy[j] - ro, y1: hy[j] + ro, ci: i, cj: j, cx: vx[i], cy: hy[j], ri: ro - 8, ro, arcs: [], k })
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) sbNodes.add((j + dj) * NV + i + di) // tunnels, jumps and roadworks keep clear
+      // the plaza corner of each of the four blocks, and no buildings on it
+      const corner = (blk: Block, right: boolean, bottom: boolean) => {
+        const w = Math.min(CORNER, blk.x1 - blk.x0 - 8),
+          h = Math.min(CORNER, blk.y1 - blk.y0 - 8)
+        const c = { x0: right ? blk.x1 - w : blk.x0, x1: right ? blk.x1 : blk.x0 + w, y0: bottom ? blk.y1 - h : blk.y0, y1: bottom ? blk.y1 : blk.y0 + h, cx: vx[i], cy: hy[j], ro }
+        blk.corner = c
+        if (blk.type !== 'build') return
+        const GAP = 3,
+          ix0 = blk.x0 + SIDEWALK,
+          iy0 = blk.y0 + SIDEWALK,
+          ix1 = blk.x1 - SIDEWALK,
+          iy1 = blk.y1 - SIDEWALK
+        const rest: Rect[] = []
+        const sx0 = right ? ix0 : c.x1 + GAP,
+          sx1 = right ? c.x0 - GAP : ix1
+        if (sx1 > sx0) rest.push({ x0: sx0, y0: iy0, x1: sx1, y1: iy1 })
+        const sy0 = bottom ? iy0 : c.y1 + GAP,
+          sy1 = bottom ? c.y0 - GAP : iy1
+        if (sy1 > sy0) rest.push({ x0: c.x0, y0: sy0, x1: c.x1, y1: sy1 })
+        blk.lots = []
+        blk.rest = rest
+      }
+      corner(blocks[(j - 1) * TILE + i - 1], true, true) // north-west block: the crossing is at its bottom-right
+      corner(blocks[(j - 1) * TILE + i], false, true) // north-east: bottom-left
+      corner(blocks[j * TILE + i - 1], true, false) // south-west: top-right
+      corner(blocks[j * TILE + i], false, false) // south-east: top-left
     })
     // sandy lots: unbuilt ground in the suburbs and the port
-    const sandy = blocks.filter((b) => b.type !== 'water' && b.type !== 'square' && !b.sb && !nearRiver(b) && b.district !== 'downtown' && sized(b, 30, 160))
+    const sandy = blocks.filter((b) => b.type !== 'water' && !b.corner && !b.sb && !nearRiver(b) && b.district !== 'downtown' && sized(b, 30, 160))
     const rank = new Map<Block, number>(sandy.map((b) => [b, (b.type === 'plaza' || b.type === 'park' ? 0 : 1) + RD() * 1.4]))
     sandy.sort((p, q) => rank.get(p)! - rank.get(q)!)
     const nSand = 2 + ((RD() * 3) | 0)
@@ -406,6 +447,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       y0 = b.y0 + SIDEWALK,
       x1 = b.x1 - SIDEWALK,
       y1 = b.y1 - SIDEWALK
+    if (b.corner) trees.push({ x: (b.corner.x0 + b.corner.x1) / 2, y: (b.corner.y0 + b.corner.y1) / 2, r: 3 + RD() * 1.2, c: RD() }) // a tree on each plaza corner
     if (b.type === 'build' && b.lots) {
       // colliders for the photos' roofs (the pictures themselves are drawn by the renderer)...
       for (const lot of b.lots) {
@@ -435,14 +477,6 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       if (b.district === 'downtown') towerSplit(x0, y0, x1, y1, 0)
       else if (b.district === 'port') genPort(x0, y0, x1, y1)
       else genSuburbs(x0, y0, x1, y1)
-    } else if (b.type === 'square' && b.square) {
-      // the statue in its fountain at the centre, and a tree in each corner
-      const { cx, cy, k } = b.square
-      push('statue', b.district, cx - 6, cy - 6, cx + 6, cy + 6, 9, [140, 142, 148], false)
-      buildings[buildings.length - 1].art = k
-      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        trees.push({ x: sx < 0 ? x0 + 9 : x1 - 9, y: sy < 0 ? y0 + 9 : y1 - 9, r: 3 + RD() * 1.5, c: RD() })
-      }
     } else if (b.type === 'park' && b.sb?.kind !== 'bend') {
       const sb = b.sb
       // rocky hills: an outcrop or two in the roomier plain parks
@@ -456,6 +490,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
             ry = y0 + 10 + RD() * Math.max(0, y1 - y0 - 20 - rh)
           const r: Rect = { x0: rx, y0: ry, x1: rx + rw, y1: ry + rh }
           if (rocks.some((o) => r.x0 < o.x1 + 4 && r.x1 > o.x0 - 4 && r.y0 < o.y1 + 4 && r.y1 > o.y0 - 4)) continue
+          if (b.corner && r.x0 < b.corner.x1 + 4 && r.x1 > b.corner.x0 - 4 && r.y0 < b.corner.y1 + 4 && r.y1 > b.corner.y0 - 4) continue
           rocks.push(r)
           push('rock', b.district, r.x0, r.y0, r.x1, r.y1, 8 + RD() * 6, [112, 108, 102], false)
           buildings[buildings.length - 1].art = (RD() * 1000) | 0
@@ -466,6 +501,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
           if (R() < 0.7) {
             const t: Tree = { x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() }
             if (rocks.some((o) => t.x > o.x0 - t.r && t.x < o.x1 + t.r && t.y > o.y0 - t.r && t.y < o.y1 + t.r)) continue // none growing out of a rock
+            if (b.corner && t.x > b.corner.x0 - t.r && t.x < b.corner.x1 + t.r && t.y > b.corner.y0 - t.r && t.y < b.corner.y1 + t.r) continue // nor on a plaza
             if (sb) {
               const clear = sb.ro + t.r + 3 // no canopy over a roundabout
               if ((t.x - sb.cx) * (t.x - sb.cx) + (t.y - sb.cy) * (t.y - sb.cy) < clear * clear) continue
@@ -475,6 +511,12 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
         }
       }
     }
+  }
+  // the statues, one on each square's island (inside the island, clear of the ring lane)
+  for (const sq of squares) {
+    const h = Math.min(4.5, sq.ri * 0.6)
+    push('statue', nearestSeed(sq.cx, sq.cy), sq.cx - h, sq.cy - h, sq.cx + h, sq.cy + h, 9, [140, 142, 148], false)
+    buildings[buildings.length - 1].art = sq.k
   }
   // bend parks: trees over the whole 2 x 2 park (the inner streets are gone), clear of the roads
   for (const sb of supers) {
@@ -683,6 +725,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     propSpots,
     curves,
     supers,
+    squares,
     riverCol,
     bridgeRows,
     statics,
