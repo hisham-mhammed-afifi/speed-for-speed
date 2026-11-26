@@ -131,6 +131,19 @@ export interface Wall {
   hy: number
 }
 
+/** A winding road through a park block: a sampled centre line from crossing node (ai, aj) to (bi, bj), in tile-local line indices. */
+export interface BlockRoad {
+  w: number
+  /** length in metres, the flat x,y centre-line points, and the arc length at each point */
+  len: number
+  pts: number[]
+  cum: number[]
+  ai: number
+  aj: number
+  bi: number
+  bj: number
+}
+
 export interface Block {
   i: number
   j: number
@@ -144,6 +157,8 @@ export interface Block {
   lots?: LotPlacement[]
   /** the strips of a lot block that are left for ordinary generated buildings */
   rest?: Rect[]
+  /** a winding road runs corner to corner through this (park) block */
+  road?: BlockRoad
 }
 
 export type LotId = 'villa' | 'campus' | 'residence'

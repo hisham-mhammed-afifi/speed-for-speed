@@ -1,4 +1,4 @@
-import type { Block, BlockDistrict, Building, District, Jump, PropSpot, Rect, StaticRec, Surface, Tree, Tunnel, Wall } from '../types'
+import type { Block, BlockDistrict, BlockRoad, Building, District, Jump, PropSpot, Rect, StaticRec, Surface, Tree, Tunnel, Wall } from '../types'
 import type { LineSet } from './layout'
 
 export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', Surface> = {
@@ -108,6 +108,14 @@ export interface City {
   queryBuildings(x0: number, y0: number, x1: number, y1: number, out: Building[]): Building[]
   hasLOS(x0: number, y0: number, x1: number, y1: number): boolean
   lanePoint(a: number, b: number, t: number): LanePoint
+  /** true for a winding road: a graph edge between two diagonal crossings that follows a curve instead of a straight line */
+  isCurve(a: number, b: number): boolean
+  /** the real length of the edge a -> b in metres (the curve's length for a winding road) */
+  edgeLength(a: number, b: number): number
+  /** how far along edge a -> b (metres from a) the point nearest (x, y) is */
+  edgeProject(a: number, b: number, x: number, y: number): number
+  /** the lane point s metres along edge a -> b, `off` metres to the right of its centre line; ux, uy is the direction of travel there. Writes into `out`. */
+  edgePoint(a: number, b: number, s: number, off: number, out: LanePoint): LanePoint
 }
 
 export type RGB = [number, number, number]
@@ -146,6 +154,8 @@ export interface Tile {
   gravel: Rect[]
   propSpots: PropSpot[]
   /** -1 for no river, else the river runs between this tile's lines riverCol and riverCol + 1, crossed at bridgeRows */
+  /** the winding roads of this tile (each also hangs off its block as block.road) */
+  curves: BlockRoad[]
   riverCol: number
   bridgeRows: number[]
   statics: StaticRec[]

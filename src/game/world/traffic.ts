@@ -6,13 +6,15 @@ import { carGrid } from './carGrid'
 import type { Car } from '../physics/car'
 import type { District } from '../types'
 import type { City } from './city'
+import type { LanePoint } from './city'
 
 const nearScratch: Car[] = []
+const lp: LanePoint = { x: 0, y: 0, ux: 0, uy: 0, len: 0 }
 /** the cars of units with sirens on, rebuilt each step (no per-step allocation) */
 const sirenScratch: Car[] = []
 
 /** How likely a candidate spawn point is accepted, per district (1 = always). */
-const TRAFFIC_WEIGHT: Record<District, number> = { downtown: 1, port: 0.55, suburbs: 0.45, highway: 0.8 }
+const TRAFFIC_WEIGHT: Record<District, number> = { downtown: 1, port: 0.55, suburbs: 0.45, highway: 1 }
 
 /** Follows the road graph, one lane edge at a time (right-hand traffic). Used by civilians and patrol cops. */
 export class LaneDriver {
@@ -27,6 +29,8 @@ export class LaneDriver {
   pullOver = false
   /** sideways shift (m, positive = right) to dodge a fast car coming up behind */
   nudge = 0
+  /** which of the highway's three lanes this driver uses, as a shift from the middle lane's centre (m, positive = right) */
+  hwyLane = [-3.6, 0, 3.6][(Math.random() * 3) | 0]
 
   constructor(city: City, a: number, b: number) {
     this.city = city
@@ -42,52 +46,49 @@ export class LaneDriver {
       ay = city.nodeY(this.a),
       bx = city.nodeX(this.b),
       by = city.nodeY(this.b)
-    const straight = nb.find((n) => Math.abs((city.nodeX(n) - bx) * (by - ay) - (city.nodeY(n) - by) * (bx - ax)) < 1)
-    return straight !== undefined && Math.random() < 0.55 ? straight : nb[(Math.random() * nb.length) | 0]
+    // winding roads are a draw: take one more often, and keep following a bend once on it
+    const bends = nb.filter((n) => city.isCurve(this.b, n))
+    if (bends.length && Math.random() < (city.isCurve(this.a, this.b) ? 0.7 : 0.3)) return bends[(Math.random() * bends.length) | 0]
+    const grid = nb.filter((n) => !city.isCurve(this.b, n))
+    if (!grid.length) return nb[(Math.random() * nb.length) | 0]
+    const straight = grid.find((n) => Math.abs((city.nodeX(n) - bx) * (by - ay) - (city.nodeY(n) - by) * (bx - ax)) < 1)
+    return straight !== undefined && Math.random() < 0.55 ? straight : grid[(Math.random() * grid.length) | 0]
   }
 
   control(car: Car, dt: number): void {
     const city = this.city
-    let pa = { x: city.nodeX(this.a), y: city.nodeY(this.a) },
-      pb = { x: city.nodeX(this.b), y: city.nodeY(this.b) }
-    let dx = pb.x - pa.x,
-      dy = pb.y - pa.y,
-      len = hyp(dx, dy) || 1
-    let ux = dx / len,
-      uy = dy / len
-    let t = (car.x - pa.x) * ux + (car.y - pa.y) * uy
+    let len = city.edgeLength(this.a, this.b)
+    let t = city.edgeProject(this.a, this.b, car.x, car.y)
     let toEnd = len - t
     if (toEnd < 45 && this.next < 0) {
       this.next = this.pickNext()
-      const cx = city.nodeX(this.next) - pb.x,
-        cy = city.nodeY(this.next) - pb.y
-      this.turnSlow = Math.abs(cx * ux + cy * uy) < 0.5 * hyp(cx, cy) // a turn, not straight on
+      city.edgePoint(this.a, this.b, len, 0, lp) // the way we leave this edge...
+      const ex = lp.ux,
+        ey = lp.uy
+      city.edgePoint(this.b, this.next, 0, 0, lp) // ...and the way the next one starts
+      this.turnSlow = Math.abs(ex * lp.ux + ey * lp.uy) < 0.5 // a turn, not straight on
     }
     if (toEnd < city.nodeHalfWidth(this.b) * 0.6 + 3 && this.next >= 0) {
       this.a = this.b
       this.b = this.next
       this.next = -1
       this.turnSlow = false
-      pa = { x: city.nodeX(this.a), y: city.nodeY(this.a) }
-      pb = { x: city.nodeX(this.b), y: city.nodeY(this.b) }
-      dx = pb.x - pa.x
-      dy = pb.y - pa.y
-      len = hyp(dx, dy) || 1
-      ux = dx / len
-      uy = dy / len
-      t = (car.x - pa.x) * ux + (car.y - pa.y) * uy
+      len = city.edgeLength(this.a, this.b)
+      t = city.edgeProject(this.a, this.b, car.x, car.y)
       toEnd = len - t
     }
     const w = city.edgeWidth(this.a, this.b)
     const lane = city.laneOffset(this.a, this.b)
     // pulling over means into the parking strip / shoulder, not the middle of the road
-    const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge
+    const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge + (w >= 28 ? this.hwyLane : 0)
     const la = clamp(6 + car.speed * 0.55, 7, 20)
     const tt = Math.min(Math.max(t, 0) + la, len)
-    const tx = pa.x + ux * tt - uy * off,
-      ty = pa.y + uy * tt + ux * off
-    steerTo(car, tx, ty)
+    city.edgePoint(this.a, this.b, tt, off, lp)
+    steerTo(car, lp.x, lp.y)
+    const ux = lp.ux,
+      uy = lp.uy
     let target = this.speedCap * (w >= 28 ? 2 : w >= 18 ? 1.3 : w <= 6 ? 0.6 : 1) // the highway ring is fast
+    if (city.isCurve(this.a, this.b)) target = Math.min(target, 10) // ease through the bends
     if (this.turnSlow && toEnd < 40) target = Math.min(target, 6.5)
     if (this.pullOver) target = Math.min(target, 3)
     // cross traffic: ease off for a fast car that is about to cross our path at the next intersection
@@ -170,7 +171,7 @@ export const Traffic = {
       u.driver.nudge += (wantNudge - u.driver.nudge) * Math.min(1, 4 * dt * mult)
 
       u.driver.control(car, dt * mult)
-      if (d > 420 || u.driver.stuck > 7 || car.health <= 0) {
+      if (d > 360 || u.driver.stuck > 7 || car.health <= 0) {
         if (car.health <= 0 && d < 120) {
           car.ctrl.throttle = 0
           car.ctrl.brake = 0.4
@@ -182,7 +183,7 @@ export const Traffic = {
       }
     }
     if (Traffic.timer <= 0 && game.civs.length < Traffic.target) {
-      Traffic.timer = 0.15
+      Traffic.timer = 0.08
       Traffic.spawn()
     }
   },
@@ -190,14 +191,26 @@ export const Traffic = {
   spawn(): void {
     const city = game.city,
       pl = game.player.car
+    // on the highway, half the tries put cars on the highway itself, mostly ahead of you
+    const hwy = pl.speed > 15 && city.districtAt(pl.x, pl.y) === 'highway'
     for (let tries = 0; tries < 10; tries++) {
-      const n = city.randomNodeNear(pl.x, pl.y, 150, 360) // the world is endless: pick near the player, not anywhere
+      let n: number
+      if (hwy && tries % 2 === 0) {
+        const r = 100 + Math.random() * 220,
+          a = Math.atan2(pl.wvy, pl.wvx) + (Math.random() < 0.3 ? Math.PI : 0)
+        n = city.nearestNode(pl.x + Math.cos(a) * r, pl.y + Math.sin(a) * r)
+      } else n = city.randomNodeNear(pl.x, pl.y, 90, 330) // the world is endless: pick near the player, not anywhere
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
       const d = hyp(nx - pl.x, ny - pl.y)
-      if (d < 150 || d > 360) continue
-      if (Math.random() > TRAFFIC_WEIGHT[city.districtAt(nx, ny)]) continue // busy downtown, sparse suburbs
-      const nb = city.neighbors(n)
+      if (d < 90 || d > 340) continue // never inside the camera's view, so cars don't pop in
+      const dist = city.districtAt(nx, ny)
+      if (Math.random() > TRAFFIC_WEIGHT[dist]) continue // busy downtown, sparse suburbs
+      let nb = city.neighbors(n)
+      if (dist === 'highway') {
+        const along = nb.filter((m) => city.districtAt(city.nodeX(m), city.nodeY(m)) === 'highway')
+        if (along.length) nb = along
+      }
       const to = nb[(Math.random() * nb.length) | 0]
       const t = 0.25 + Math.random() * 0.4
       const p = city.lanePoint(n, to, t)

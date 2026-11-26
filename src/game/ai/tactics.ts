@@ -20,7 +20,7 @@ export interface Intercept {
 }
 
 /** Rough cop travel speed through the streets (corners included), m/s. */
-const COP_SPEED = 26
+const COP_SPEED = 40
 
 function edgeIntercept(city: City, n0: number, n1: number, alongPl: number, fromLen: number, speed: number): Intercept | null {
   const x0 = city.nodeX(n0),
@@ -58,6 +58,7 @@ export function predictRoute(city: City, px: number, py: number, vx: number, vy:
     alongPl = 0,
     len = 0
   for (const b of city.neighbors(a)) {
+    if (city.isCurve(a, b)) continue
     const ex = city.nodeX(b) - city.nodeX(a),
       ey = city.nodeY(b) - city.nodeY(a)
     const l = hyp(ex, ey)
@@ -85,7 +86,7 @@ export function predictRoute(city: City, px: number, py: number, vx: number, vy:
     let nxt = -1
     best = 0.85
     for (const c of city.neighbors(cur)) {
-      if (c === prev) continue
+      if (c === prev || city.isCurve(cur, c)) continue
       const ex = city.nodeX(c) - city.nodeX(cur),
         ey = city.nodeY(c) - city.nodeY(cur)
       const dot = (ex * sx + ey * sy) / (hyp(ex, ey) * sl)
@@ -108,7 +109,7 @@ const clampUnit = (v: number) => Math.max(-1, Math.min(1, v))
 
 function pathLength(city: City, path: number[]): number {
   let L = 0
-  for (let i = 1; i < path.length; i++) L += hyp(city.nodeX(path[i]) - city.nodeX(path[i - 1]), city.nodeY(path[i]) - city.nodeY(path[i - 1]))
+  for (let i = 1; i < path.length; i++) L += city.edgeLength(path[i - 1], path[i])
   return L
 }
 

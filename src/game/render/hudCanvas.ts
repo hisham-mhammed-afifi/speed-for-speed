@@ -34,6 +34,18 @@ function tileMap(t: Tile): HTMLCanvasElement {
     x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
+  // winding roads
+  x.strokeStyle = '#4a4f58'
+  x.lineWidth = 9
+  x.lineJoin = 'round'
+  for (const r of t.curves) {
+    x.beginPath()
+    for (let q = 0; q < r.pts.length; q += 2) {
+      if (q) x.lineTo(r.pts[q], r.pts[q + 1])
+      else x.moveTo(r.pts[q], r.pts[q + 1])
+    }
+    x.stroke()
+  }
   for (const bd of t.buildings) {
     x.fillStyle = bd.kind === 'container' ? '#3b2f2b' : bd.kind === 'house' ? '#2f3a30' : bd.kind === 'tower' ? '#1c2029' : '#26231f'
     x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)

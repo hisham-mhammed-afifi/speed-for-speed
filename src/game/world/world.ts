@@ -1,9 +1,10 @@
 import { hyp } from '../core/math'
+import { CURVE_LANE, CURVE_W, roadAt, roadDist2, roadProject } from './curve'
 import { CELL, LANE_OFFSET, RAMPS, SIDEWALK, SURF, TILE } from './city'
 import type { City, RoadType, Tile } from './city'
 import { Axis } from './layout'
 import { generateTile } from './tile'
-import type { Block, Building, District, Rect, StaticRec, Wall } from '../types'
+import type { Block, BlockRoad, Building, District, Rect, StaticRec, Wall } from '../types'
 
 export const DEFAULT_SEED = 20261123
 
@@ -274,6 +275,23 @@ export const World = {
       return blocks[j * BW + i]
     }
 
+    // ---------- winding roads: extra graph edges between diagonal crossings, each following its curve ----------
+    const NC = NV * NH
+    const extra = new Map<number, number[]>()
+    const curveOf = new Map<number, { road: BlockRoad; fwd: boolean }>()
+    for (let b = 0; b < n; b++)
+      for (let a = 0; a < n; a++)
+        for (const r of tiles[b * n + a].curves) {
+          const na = (b * TILE + r.aj) * NV + a * TILE + r.ai,
+            nb = (b * TILE + r.bj) * NV + a * TILE + r.bi
+          for (const [p, q, fwd] of [[na, nb, true], [nb, na, false]] as const) {
+            curveOf.set(p * NC + q, { road: r, fwd })
+            const l = extra.get(p)
+            if (l) l.push(q)
+            else extra.set(p, [q])
+          }
+        }
+
     const city: City = {
       NV,
       NH,
@@ -331,11 +349,13 @@ export const World = {
         if (i < NV - 1) add(i + 1, j)
         if (j > 0) add(i, j - 1)
         if (j < NH - 1) add(i, j + 1)
+        const more = extra.get(id)
+        if (more) for (let k = 0; k < more.length; k++) out.push(more[k])
         return out
       },
       nearestNode: (x, y) => nearestLine(hy, y) * NV + nearestLine(vx, x),
-      edgeWidth: (a, b) => (((a / NV) | 0) === ((b / NV) | 0) ? hw[(a / NV) | 0] : vw[a % NV]),
-      laneOffset: (a, b) => LANE_OFFSET[((a / NV) | 0) === ((b / NV) | 0) ? ht[(a / NV) | 0] : vt[a % NV]],
+      edgeWidth: (a, b) => (curveOf.has(a * NC + b) ? CURVE_W : ((a / NV) | 0) === ((b / NV) | 0) ? hw[(a / NV) | 0] : vw[a % NV]),
+      laneOffset: (a, b) => (curveOf.has(a * NC + b) ? CURVE_LANE : LANE_OFFSET[((a / NV) | 0) === ((b / NV) | 0) ? ht[(a / NV) | 0] : vt[a % NV]]),
       nodeHalfWidth: (id) => Math.max(vw[id % NV], hw[(id / NV) | 0]) / 2,
       randomNode: () => (Math.random() * NV * NH) | 0,
       randomNodeNear(x, y, rMin, rMax) {
@@ -373,6 +393,7 @@ export const World = {
         }
         const b = blockAt(x, y)
         if (!b) return SURF.lot
+        if (b.road && roadDist2(b.road, x, y) <= (b.road.w / 2) * (b.road.w / 2)) return SURF.asphalt // a winding road through the park
         if (x < b.x0 + SIDEWALK || x > b.x1 - SIDEWALK || y < b.y0 + SIDEWALK || y > b.y1 - SIDEWALK) return SURF.sidewalk
         return b.type === 'park' || b.district === 'suburbs' ? SURF.grass : SURF.lot
       },
@@ -440,7 +461,52 @@ export const World = {
         return true
       },
       // lane point for travelling from node a to node b (right-hand traffic)
+      isCurve: (a, b) => curveOf.has(a * NC + b),
+      edgeLength(a, b) {
+        const c = curveOf.get(a * NC + b)
+        return c ? c.road.len : hyp(city.nodeX(b) - city.nodeX(a), city.nodeY(b) - city.nodeY(a))
+      },
+      edgeProject(a, b, x, y) {
+        const c = curveOf.get(a * NC + b)
+        if (c) {
+          const s = roadProject(c.road, x, y)
+          return c.fwd ? s : c.road.len - s
+        }
+        const ax = city.nodeX(a),
+          ay = city.nodeY(a)
+        const dx = city.nodeX(b) - ax,
+          dy = city.nodeY(b) - ay
+        const len = hyp(dx, dy) || 1
+        return ((x - ax) * dx + (y - ay) * dy) / len
+      },
+      edgePoint(a, b, s, off, out) {
+        const c = curveOf.get(a * NC + b)
+        if (c) {
+          roadAt(c.road, c.fwd ? s : c.road.len - s, out)
+          if (!c.fwd) {
+            out.ux = -out.ux
+            out.uy = -out.uy
+          }
+          out.len = c.road.len
+        } else {
+          const ax = city.nodeX(a),
+            ay = city.nodeY(a)
+          const dx = city.nodeX(b) - ax,
+            dy = city.nodeY(b) - ay
+          const len = hyp(dx, dy) || 1
+          out.ux = dx / len
+          out.uy = dy / len
+          out.x = ax + out.ux * s
+          out.y = ay + out.uy * s
+          out.len = len
+        }
+        out.x -= out.uy * off
+        out.y += out.ux * off
+        return out
+      },
       lanePoint(a, b, t) {
+        const curve = curveOf.get(a * NC + b)
+        if (curve) return city.edgePoint(a, b, t * curve.road.len, CURVE_LANE, { x: 0, y: 0, ux: 0, uy: 0, len: 0 })
         const ax = city.nodeX(a),
           ay = city.nodeY(a),
           bx = city.nodeX(b),

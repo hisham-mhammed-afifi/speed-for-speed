@@ -10,6 +10,21 @@ import { FX } from '../render/effects'
 import { game } from '../state'
 import { LaneDriver } from '../world/traffic'
 import type { Car } from '../physics/car'
+import type { City, LanePoint } from '../world/city'
+
+const aim: LanePoint = { x: 0, y: 0, ux: 0, uy: 0, len: 0 }
+/**
+ * Road-following steering for a path step that is a winding road: aims at a point ahead on the curve (written to `aim`) so a cop
+ * follows the bend instead of cutting across the park. Returns false for ordinary straight edges.
+ */
+function aimOnCurve(city: City, path: number[], pi: number, car: Car): boolean {
+  if (pi < 1 || !city.isCurve(path[pi - 1], path[pi])) return false
+  const a = path[pi - 1],
+    b = path[pi]
+  const s = city.edgeProject(a, b, car.x, car.y)
+  city.edgePoint(a, b, Math.min(s + 9 + car.speed * 0.6, city.edgeLength(a, b)), 0, aim)
+  return true
+}
 
 export type PoliceState = 'patrol' | 'pursue' | 'intercept' | 'block' | 'wrecked'
 export type PoliceRole = 'ram' | 'flank' | 'block'
@@ -148,6 +163,16 @@ export const Police = {
           if (u.detectT <= 0 && !H.active) {
             u.detectT = 0.3
             if (d < 85 && pl.speed > 26 && game.city.hasLOS(car.x, car.y, pl.x, pl.y)) H.start('SPEEDING')
+          }
+          // a patrol that sees the player during a chase joins it instead of letting the car go by
+          if (u.detectT <= 0 && H.active && d < 85 && game.city.hasLOS(car.x, car.y, pl.x, pl.y)) {
+            u.detectT = 0.3
+            u.state = 'pursue'
+            u.role = 'flank'
+            u.path = null
+            u.los = false
+            car.boost = 1.3
+            break
           }
           if (d > 620 || u.driver!.stuck > 8) {
             game.removeCar(car)
@@ -309,7 +334,8 @@ export const Police = {
       }
       tx = nx
       ty = ny
-      tspeed = 42
+      tspeed = 62
+      const onBend = aimOnCurve(city, path, u.pi, car)
       if (u.pi < last) {
         const n2 = path[u.pi + 1]
         const ax = nx - car.x,
@@ -323,6 +349,11 @@ export const Police = {
           tspeed = Math.min(tspeed, Math.sqrt(8.5 * 8.5 + 2 * 9 * Math.max(dd - 14, 0)))
         }
       } else tspeed = 14
+      if (onBend) {
+        tx = aim.x
+        ty = aim.y
+        tspeed = Math.min(tspeed, 24) // ease through the bend
+      }
     }
     steerTo(car, tx, ty)
     speedTo(car, tspeed)
@@ -399,6 +430,7 @@ export const Police = {
       tx = nx
       ty = ny
       tspeed = 38
+      const onBend = aimOnCurve(city, path, u.pi, car)
       if (u.pi < last) {
         const n2 = path[u.pi + 1]
         const ax = nx - car.x,
@@ -407,6 +439,11 @@ export const Police = {
           by = city.nodeY(n2) - ny
         if ((ax * bx + ay * by) / (hyp(ax, ay) * hyp(bx, by) + 1e-6) < 0.6)
           tspeed = Math.min(tspeed, Math.sqrt(72 + 18 * Math.max(hyp(ax, ay) - 14, 0)))
+      }
+      if (onBend) {
+        tx = aim.x
+        ty = aim.y
+        tspeed = Math.min(tspeed, 24)
       }
     } else {
       tx = ic.wx

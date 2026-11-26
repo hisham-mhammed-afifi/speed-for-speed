@@ -97,6 +97,16 @@ loops allocate nothing per step (`carGrid` hash, A* typed arrays and heap, `hyp`
 tiles near the view. Soak test: open `/?debug&heat=3`, run `scripts/soak-bot.js` in the page, and read `window.__soak` (frame time, work time,
 `canvasMB()` and heap every 10 s); frame time, canvas memory (under about 5 MB) and heap stay flat.
 
+Winding roads: about a tenth of each tile's blocks become parks crossed by a curved road (`tile.ts`, own random stream; `world/curve.ts` has the
+Hermite path and its distance / projection helpers). Chains of 3 to 6 blocks weave corner to corner, every curve is an extra edge between two
+existing crossings (`city.isCurve / edgeLength / edgeProject / edgePoint`), so node ids, A* and recentring are unchanged. Traffic and
+patrols follow them (`LaneDriver`), pursuing cops aim along the bend, and traps and cut-offs stay on straight streets.
+
+Chase rules: holding one heading above 30 m/s for 6 s makes you predictable and the evade meter stops filling until you make a real turn
+(over 50 degrees), slow down or enter a tunnel; the highway fills it at half rate; a long highway run draws a three-car roadblock 300-400 m
+ahead; most new pursuers spawn in a cone ahead of you; patrols that see you join the chase. Traffic is 80 cars on desktop (50 on phones) before
+the tier multiplier, with three lanes each way on the highway. Chase and soak bots: `scripts/straight-bot.js`, `scripts/soak-bot.js`.
+
 Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you are heading (the road you are on and its straight
 continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
 give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.

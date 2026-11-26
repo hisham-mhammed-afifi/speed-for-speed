@@ -12,7 +12,7 @@ import { quality } from "./quality";
 import { GRASS_FILES, LOTS, TREE_FILES, treeSpecies } from "../world/worldArt";
 import type { City, Tile } from "../world/city";
 import type { Heli, Spike } from "../ai/heat";
-import type { Building, LotPlacement, Vec2 } from "../types";
+import type { BlockRoad, Building, LotPlacement, Vec2 } from "../types";
 
 function makeTex(
   size: number,
@@ -68,6 +68,45 @@ function drawLot(ctx: CanvasRenderingContext2D, lot: LotPlacement): void {
   ctx.restore();
 }
 
+/** Trace the road's centre line between two arc lengths into the current path. */
+function tracePath(ctx: CanvasRenderingContext2D, r: BlockRoad, s0: number, s1: number): void {
+  ctx.beginPath();
+  let started = false;
+  for (let k = 0; k < r.cum.length; k++) {
+    if (r.cum[k] < s0 || r.cum[k] > s1) continue;
+    if (started) ctx.lineTo(r.pts[2 * k], r.pts[2 * k + 1]);
+    else ctx.moveTo(r.pts[2 * k], r.pts[2 * k + 1]);
+    started = true;
+  }
+}
+
+/** The winding roads of a tile: a kerb, the asphalt and a dashed centre line, laid over the park they cross. */
+function drawCurves(ctx: CanvasRenderingContext2D, t: Tile, vis: Visible): void {
+  ctx.lineJoin = "round";
+  ctx.lineCap = "butt";
+  for (const r of t.curves) {
+    const m = r.cum.length >> 1;
+    const mx = r.pts[2 * m],
+      my = r.pts[2 * m + 1];
+    if (mx < vis.x0 - 110 || mx > vis.x1 + 110 || my < vis.y0 - 110 || my > vis.y1 + 110) continue;
+    // the kerb stops short of the crossings so it doesn't paint over their asphalt
+    ctx.strokeStyle = pat.sidewalk;
+    ctx.lineWidth = r.w + 2.4;
+    tracePath(ctx, r, 24, r.len - 24);
+    ctx.stroke();
+    ctx.strokeStyle = pat.asphalt;
+    ctx.lineWidth = r.w;
+    tracePath(ctx, r, 0, r.len);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(232,200,90,0.75)";
+    ctx.lineWidth = 0.22;
+    ctx.setLineDash([3.5, 4.5]);
+    tracePath(ctx, r, 14, r.len - 14);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
 function drawGround(
   ctx: CanvasRenderingContext2D,
   city: City,
@@ -111,6 +150,7 @@ function drawGround(
       ctx.lineWidth = 0.3;
       ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0);
     }
+    if (t.curves.length) drawCurves(ctx, t, vis);
   }
   // the rivers, with bridge decks (rails on both sides) where the bridge streets cross them
   for (const rv of city.rivers) {

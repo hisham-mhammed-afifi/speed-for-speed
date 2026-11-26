@@ -99,7 +99,7 @@ export function findPath(city: City, start: number, goal: number): number[] | nu
       if (closedGen[nx] === gen) continue
       const px = city.nodeX(nx),
         py = city.nodeY(nx)
-      const cost = gScore[cur] + Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
+      const cost = gScore[cur] + (city.isCurve(cur, nx) ? city.edgeLength(cur, nx) : Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy)))
       if (gGen[nx] !== gen || cost < gScore[nx]) {
         gGen[nx] = gen
         gScore[nx] = cost

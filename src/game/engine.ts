@@ -129,7 +129,7 @@ class GameEngine {
 
   /** Busy roads on desktop, a lighter city on phones so they keep 60 FPS. */
   private applyDensity(): void {
-    Traffic.target = Math.round((touch.active ? 30 : 45) * quality.spec.traffic)
+    Traffic.target = Math.round((touch.active ? 50 : 80) * quality.spec.traffic)
     Police.ambientTarget = quality.spec.patrols
   }
 

@@ -1,10 +1,11 @@
 import { rng } from '../core/math'
+import { CURVE_W, hermite, roadDist2 } from './curve'
 import { BRIDGES, CONTAINER_COLORS, LANE_OFFSET, PALETTES, RAMPS, RIVER_I, SIDEWALK, TILE } from './city'
 import type { DistrictSeed, RGB, Tile } from './city'
 import { hash3 } from './layout'
 import type { LineSet } from './layout'
 import { fitScale, LOTS, lotDims, lotRect, tileGrid } from './worldArt'
-import type { Block, BlockDistrict, Building, BuildingKind, Jump, LotPlacement, PropSpot, Rect, StaticRec, Tree, Tunnel, Wall } from '../types'
+import type { Block, BlockDistrict, BlockRoad, Building, BuildingKind, Jump, LotPlacement, PropSpot, Rect, StaticRec, Tree, Tunnel, Wall } from '../types'
 
 const NAME_A = ['Port', 'North', 'East', 'West', 'South', 'Old', 'New', 'Fort', 'Lake', 'Mount', 'Cape', 'Grand', 'Iron', 'Silver', 'Red', 'Stone']
 const NAME_B = ['Ashford', 'Brook', 'Cove', 'Dale', 'Ridge', 'Haven', 'Mill', 'Point', 'Shore', 'Vale', 'Harbor', 'Heights', 'Crossing', 'Park', 'Bridge', 'Falls']
@@ -107,6 +108,77 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       if (w > 50 && h > 50 && r < PARK_P[district]) b.type = 'park'
       else if (w > 40 && h > 40 && r < PARK_P[district] + PLAZA_P[district]) b.type = 'plaza'
       blocks.push(b)
+    }
+  }
+
+  // ---------- winding roads: chains of park blocks, each crossed by a curve from one crossing to the opposite corner ----------
+  // (their own random stream, like the lots, so the rest of the town doesn't depend on them)
+  const curves: BlockRoad[] = []
+  {
+    const RC = rng(hash3(seed ^ 0x2c0ffee, tx, ty))
+    const D2R = Math.PI / 180
+    let amp = 1
+    const jit = (deg: number) => (RC() * 2 - 1) * deg * D2R * amp
+    const chains = 4 + ((RC() * 3) | 0)
+    for (let c = 0; c < chains; c++) {
+      for (let attempt = 0; attempt < 16; attempt++) {
+        amp = attempt < 5 ? 1 : attempt < 10 ? 0.55 : 0.25 // bend less when the first tries don't fit the block
+        const steps = 3 + ((RC() * 4) | 0) // blocks in the chain
+        const i0 = 1 + ((RC() * (14 - steps + 1)) | 0)
+        // the nodes' rows: a random walk, one row per column step, kept on lines 1..15 (never touching the highway ring)
+        const nj: number[] = [1 + ((RC() * 15) | 0)]
+        const dir: number[] = []
+        for (let k = 0; k < steps; k++) {
+          const cur = nj[k]
+          const d = cur <= 1 ? 1 : cur >= 15 ? -1 : k > 0 && RC() < 0.75 ? -dir[k - 1] : RC() < 0.5 ? 1 : -1 // mostly weave up and down
+          dir.push(d)
+          nj.push(cur + d)
+        }
+        const idx = nj.slice(0, -1).map((j, k) => Math.min(j, nj[k + 1]) * TILE + i0 + k)
+        if (idx.some((q) => blocks[q].road || blocks[q].type === 'water' || blocks[q].i === riverCol)) continue
+        // tangent angle at each node: along the chord when both neighbours bend the same way, nearly level when the road zigzags
+        const chord = dir.map((_d, k) => Math.atan2(hy[nj[k + 1]] - hy[nj[k]], vx[i0 + k + 1] - vx[i0 + k]))
+        const th: number[] = []
+        for (let k = 0; k <= steps; k++) {
+          if (k === 0) th.push(chord[0] + jit(35))
+          else if (k === steps) th.push(chord[steps - 1] + jit(35))
+          else th.push(dir[k - 1] === dir[k] ? (chord[k - 1] + chord[k]) / 2 + (k % 2 ? 1 : -1) * (14 + RC() * 24) * D2R * amp : jit(8)) // weave left and right
+        }
+        const roads: BlockRoad[] = []
+        let ok = true
+        for (let k = 0; k < steps && ok; k++) {
+          const ax = vx[i0 + k],
+            ay = hy[nj[k]],
+            bx = vx[i0 + k + 1],
+            by = hy[nj[k + 1]]
+          const chordLen = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+          const mag = chordLen * (0.4 + RC() * 0.35)
+          const r = hermite(ax, ay, bx, by, th[k], th[k + 1], mag, mag)
+          r.ai = i0 + k
+          r.aj = nj[k]
+          r.bi = i0 + k + 1
+          r.bj = nj[k + 1]
+          // beyond the crossings, the road must stay inside its block (inset by its own half width and a sidewalk)
+          const b = blocks[idx[k]]
+          const inset = CURVE_W / 2 + 1.5
+          for (let q = 0; q < r.pts.length && ok; q += 2) {
+            const x = r.pts[q],
+              y = r.pts[q + 1]
+            const nearA = (x - ax) * (x - ax) + (y - ay) * (y - ay) < 32 * 32,
+              nearB = (x - bx) * (x - bx) + (y - by) * (y - by) < 32 * 32
+            if (!nearA && !nearB && (x < b.x0 + inset || x > b.x1 - inset || y < b.y0 + inset || y > b.y1 - inset)) ok = false
+          }
+          roads.push(r)
+        }
+        if (!ok) continue
+        roads.forEach((r, k) => {
+          const b = blocks[idx[k]]
+          b.type = 'park'
+          b.road = r
+          curves.push(r)
+        })
+        break
+      }
     }
   }
 
@@ -329,7 +401,11 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     } else if (b.type === 'park') {
       for (let ty = y0 + 8; ty < y1 - 4; ty += 13) {
         for (let tx = x0 + 8; tx < x1 - 4; tx += 13) {
-          if (R() < 0.7) trees.push({ x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() })
+          if (R() < 0.7) {
+            const t: Tree = { x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() }
+            const clear = b.road ? CURVE_W / 2 + t.r + 1.5 : 0 // no canopy over a winding road
+            if (!b.road || roadDist2(b.road, t.x, t.y) > clear * clear) trees.push(t)
+          }
         }
       }
     }
@@ -493,8 +569,10 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       to = (horizEdge ? b.x1 : b.y1) - 6
     for (let t = from; t < to; t += 3.2) {
       if (R() < 0.12) continue
-      if (horizEdge) addProp('fence', t, side === 0 ? b.y0 + 1.5 : b.y1 - 1.5, 0)
-      else addProp('fence', side === 2 ? b.x0 + 1.5 : b.x1 - 1.5, t, Math.PI / 2)
+      const fx = horizEdge ? t : side === 2 ? b.x0 + 1.5 : b.x1 - 1.5,
+        fy = horizEdge ? (side === 0 ? b.y0 + 1.5 : b.y1 - 1.5) : t
+      if (b.road && roadDist2(b.road, fx, fy) < (CURVE_W / 2 + 2) * (CURVE_W / 2 + 2)) continue // the road passes through the fence line
+      addProp('fence', fx, fy, horizEdge ? 0 : Math.PI / 2)
     }
   }
 
@@ -526,6 +604,7 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     jumps,
     gravel,
     propSpots,
+    curves,
     riverCol,
     bridgeRows,
     statics,

@@ -1,4 +1,4 @@
-import { clamp, hyp } from '../core/math'
+import { clamp, hyp, wrapAngle } from '../core/math'
 import { Phys } from '../physics/world'
 import { game } from '../state'
 import { Difficulty } from './difficulty'
@@ -107,6 +107,13 @@ export class HeatManager {
   spikeT = 0
   heliT = 0
   grace = 0
+  /** how long you have held (nearly) one heading at speed, the heading itself, and whether the dispatch has worked out where you are going */
+  straightT = 0
+  headRef = 0
+  predictable = false
+  /** seconds on the highway, and the countdown to the next highway roadblock */
+  hwyT = 0
+  hwyBlockT = 0
   blocks: Roadblock[] = []
   spikes: Spike[] = []
   heli: Heli | null = null
@@ -129,8 +136,12 @@ export class HeatManager {
     this.tacticsT = 0
     this.memToastT = 0
     Tactics.reset()
-    this.blockT = 15
-    this.spikeT = 20
+    this.blockT = 20
+    this.spikeT = 25
+    this.straightT = 0
+    this.predictable = false
+    this.hwyT = 0
+    this.hwyBlockT = 8
     this.heliT = 0
     this.grace = 0
     this.copsDown = 0
@@ -226,6 +237,7 @@ export class HeatManager {
         let to = -1,
           bd = 1e9
         for (const m of city.neighbors(n)) {
+          if (city.isCurve(n, m)) continue // traps go on straight streets
           const d = hyp(city.nodeX(m) - pl.x, city.nodeY(m) - pl.y)
           if (d < bd) {
             bd = d
@@ -247,18 +259,18 @@ export class HeatManager {
     return aheadSpot(dist)
   }
 
-  private placeRoadblock(): void {
-    const s = this.trapSpot(220 + Math.random() * 60)
+  private placeRoadblock(dist = 220 + Math.random() * 60, cars = 2): void {
+    const s = this.trapSpot(dist)
     if (!s) return
     const heavy = this.level >= 4
     const base = s.horiz ? Math.PI / 2 : 0
     const blk: Roadblock = { x: s.x, y: s.y, units: [], t: 0 }
-    for (const side of [-1, 1]) {
-      const off = side * s.w * 0.2
+    for (const side of cars === 3 ? [-1, 0, 1] : [-1, 1]) {
+      const off = side * s.w * (cars === 3 ? 0.35 : 0.2)
       const x = s.horiz ? s.x : s.x + off,
         y = s.horiz ? s.y + off : s.y
       if (!game.spotFree(x, y, 5)) continue
-      const u = Police.spawnUnit(x, y, base + side * 0.45 + (Math.random() - 0.5) * 0.2, 'block', heavy)
+      const u = Police.spawnUnit(x, y, base + (side || 0.3) * 0.45 + (Math.random() - 0.5) * 0.2, 'block', heavy)
       Phys.setMass(u.car, u.car.spec.mass * 1.6)
       blk.units.push(u)
     }
@@ -281,8 +293,20 @@ export class HeatManager {
     const city = game.city,
       pl = game.player.car
     let pick: number | null = null
+    // most of the time, send the next unit to meet you head on: out in front, inside a cone around your heading
+    const ahead = pl.speed > 12 && Math.random() < 0.6
     for (let tries = 0; tries < 20; tries++) {
-      const n = city.randomNodeNear(pl.x, pl.y, Difficulty.k.spawnMin, Difficulty.k.spawnMax)
+      let n: number
+      if (ahead && tries < 12) {
+        const a = Math.atan2(pl.wvy, pl.wvx) + (Math.random() - 0.5) * 1.7,
+          r = 200 + Math.random() * 180
+        n = city.nearestNode(pl.x + Math.cos(a) * r, pl.y + Math.sin(a) * r)
+        const d = hyp(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
+        if (d < 170 || d > 420) continue
+        pick = n
+        break
+      }
+      n = city.randomNodeNear(pl.x, pl.y, Difficulty.k.spawnMin, Difficulty.k.spawnMax)
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
       const d = hyp(nx - pl.x, ny - pl.y)
@@ -293,7 +317,7 @@ export class HeatManager {
       break
     }
     if (pick === null) return
-    const nb = city.neighbors(pick)
+    const nb = city.neighbors(pick).filter((m) => !city.isCurve(pick, m)) // straight streets only
     let to = nb[0],
       bd = 1e9
     for (const n of nb) {
@@ -381,11 +405,29 @@ export class HeatManager {
     this.visible = visible
     if (!visible) Memory.recordHidden(pl.x, pl.y, dt)
     if (this.memToastT > 0) this.memToastT -= dt
+    // Holding one heading at speed makes you predictable: the dispatch works out where you are going, and being out of sight stops helping
+    if (pl.speed > 30 && !game.city.inTunnel(pl.x, pl.y)) {
+      const dh = Math.abs(wrapAngle(pl.theta - this.headRef))
+      if (this.straightT <= 0 || dh > 0.87) {
+        this.headRef = pl.theta // a real turn (more than 50 degrees): start again
+        this.straightT = 0.001
+        this.predictable = false
+      } else this.straightT += dt
+      if (this.straightT > 6 && !this.predictable) {
+        this.predictable = true
+        game.toast('THEY KNOW WHERE YOU ARE HEADING: TURN OFF', '#ff9a3c')
+      }
+    } else {
+      this.straightT = 0
+      this.predictable = false
+    }
+    const onHighway = game.city.districtAt(pl.x, pl.y) === 'highway'
+    this.hwyT = onHighway ? this.hwyT + dt : 0
     if (visible) {
       this.lastX = pl.x
       this.lastY = pl.y
       this.evade = Math.max(0, this.evade - dt * 2.5)
-    } else this.evade += dt
+    } else if (!this.predictable) this.evade += dt * (onHighway ? 0.5 : 1) // traffic cameras watch the highway
 
     const slow = pl.speed < 7
     if (slow && near > 0) this.bust += dt * (0.28 + 0.18 * Math.min(near, 3))
@@ -435,14 +477,22 @@ export class HeatManager {
       )
     }
     // roadblocks & spikes
-    if (this.level >= 3) {
+    if (this.level >= 2) {
       this.blockT -= dt
       if (this.blockT <= 0) {
         this.blockT = 24 * Difficulty.k.trapMul
         this.placeRoadblock()
       }
     }
-    if (this.level >= 4) {
+    // a long run down the highway gets a wall of cars across it, well ahead
+    if (this.hwyT > 10 && this.grace <= 0) {
+      this.hwyBlockT -= dt
+      if (this.hwyBlockT <= 0) {
+        this.hwyBlockT = 16 * Difficulty.k.trapMul
+        this.placeRoadblock(300 + Math.random() * 100, 3)
+      }
+    }
+    if (this.level >= 3) {
       this.spikeT -= dt
       if (this.spikeT <= 0) {
         this.spikeT = 30 * Difficulty.k.trapMul
