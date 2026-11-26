@@ -1,3 +1,4 @@
+import { hyp } from '../core/math'
 import { CELL, LANE_OFFSET, RAMPS, SIDEWALK, SURF, TILE } from './city'
 import type { City, RoadType, Tile } from './city'
 import { Axis } from './layout'
@@ -311,9 +312,12 @@ export const World = {
       isRamp,
       waterBlocked,
       neighbors(id) {
+        return city.neighborsInto(id, [])
+      },
+      neighborsInto(id, out) {
+        out.length = 0
         const i = id % NV,
-          j = (id / NV) | 0,
-          out: number[] = []
+          j = (id / NV) | 0
         const ring = onRing(i, j)
         const add = (ni: number, nj: number) => {
           const nRing = onRing(ni, nj)
@@ -363,7 +367,8 @@ export const World = {
       surfaceAt(x, y) {
         if (x < minX || x > maxX || y < minY || y > maxY) return SURF.lot
         if (colRoad(x) >= 0 || rowRoad(y) >= 0) {
-          for (let k = 0; k < gravel.length; k++) if (inRect(gravel[k], x, y)) return SURF.gravel // construction zones
+          const g = city.tileAt(x, y)?.gravel // construction zones: only this tile's few rectangles
+          if (g) for (let k = 0; k < g.length; k++) if (inRect(g[k], x, y)) return SURF.gravel
           return SURF.asphalt
         }
         const b = blockAt(x, y)
@@ -424,7 +429,7 @@ export const World = {
       hasLOS(x0, y0, x1, y1) {
         const dx = x1 - x0,
           dy = y1 - y0,
-          d = Math.hypot(dx, dy)
+          d = hyp(dx, dy)
         const steps = Math.ceil(d / 4)
         for (let k = 1; k < steps; k++) {
           const t = k / steps
@@ -440,7 +445,7 @@ export const World = {
           ay = city.nodeY(a),
           bx = city.nodeX(b),
           by = city.nodeY(b)
-        const len = Math.hypot(bx - ax, by - ay) || 1
+        const len = hyp(bx - ax, by - ay) || 1
         const ux = (bx - ax) / len,
           uy = (by - ay) / len
         const off = city.laneOffset(a, b)

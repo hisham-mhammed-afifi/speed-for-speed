@@ -1,5 +1,5 @@
 import type Matter from 'matter-js'
-import { clamp } from '../core/math'
+import { clamp, hyp } from '../core/math'
 import { Phys } from './world'
 import type { CarKind, CarSpec, Controls, Surface, SurfaceKind, Vec2 } from '../types'
 import type { PoliceUnit } from '../ai/police'
@@ -268,6 +268,6 @@ export class Car {
       s = Math.sin(this.theta)
     this.vx = this.wvx * c + this.wvy * s
     this.vy = -this.wvx * s + this.wvy * c
-    this.speed = Math.hypot(this.wvx, this.wvy)
+    this.speed = hyp(this.wvx, this.wvy)
   }
 }

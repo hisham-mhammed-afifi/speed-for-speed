@@ -19,6 +19,8 @@ export interface TierSpec {
   rotateTrees: boolean
   /** share of smoke puffs that are actually spawned */
   particles: number
+  /** every car leaves skid marks (false: only the player does) */
+  skidsAll: boolean
   /** share of the normal civilian count */
   traffic: number
   /** ambient police patrols when there is no pursuit */
@@ -28,9 +30,9 @@ export interface TierSpec {
 }
 
 export const TIERS: Record<Tier, TierSpec> = {
-  high: { step: 1 / 120, shadows: true, glow: true, rotateTrees: true, particles: 1, traffic: 1, patrols: 8, staticRadius: 520 },
-  medium: { step: 1 / 60, shadows: false, glow: true, rotateTrees: true, particles: 0.5, traffic: 0.8, patrols: 6, staticRadius: 450 },
-  low: { step: 1 / 60, shadows: false, glow: false, rotateTrees: false, particles: 0.25, traffic: 0.55, patrols: 4, staticRadius: 380 },
+  high: { step: 1 / 120, shadows: true, glow: true, rotateTrees: true, particles: 1, skidsAll: true, traffic: 1, patrols: 8, staticRadius: 520 },
+  medium: { step: 1 / 60, shadows: false, glow: true, rotateTrees: true, particles: 0.5, skidsAll: true, traffic: 0.8, patrols: 6, staticRadius: 450 },
+  low: { step: 1 / 60, shadows: false, glow: false, rotateTrees: false, particles: 0.25, skidsAll: false, traffic: 0.55, patrols: 4, staticRadius: 380 },
 }
 
 /** The auto ladder, best first. Each rung is a tier and a canvas-resolution multiplier. */

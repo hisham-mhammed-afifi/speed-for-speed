@@ -79,6 +79,8 @@ export interface City {
   nodeY(id: number): number
   nodeId(i: number, j: number): number
   neighbors(id: number): number[]
+  /** like neighbors, but fills a caller-supplied array (no allocation) and returns it */
+  neighborsInto(id: number, out: number[]): number[]
   isRamp(i: number, j: number): boolean
   nearestNode(x: number, y: number): number
   edgeWidth(a: number, b: number): number

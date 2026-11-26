@@ -90,6 +90,13 @@ speedometer dial, phone speed panel and minimap are cached offscreen. `render/qu
 medium and low = 60 Hz physics, no shadows or glows, less traffic, lower canvas resolution). Phones start on medium; in auto the game steps down
 after 2 s of slow frames and back up after 8 s of headroom. Force one with `?quality=high|medium|low|auto` or the pause menu button (saved).
 
+Long sessions: canvas memory is native, not in the JS heap, so it is capped. Skid marks live in at most 12 chunks of 128 m (the farthest is
+recycled), minimap canvases are freed when their tile leaves the window, and every offscreen source canvas is CPU-backed
+(`core/canvas.ts`, `willReadFrequently`), which avoids a GPU-to-CPU pixel readback on every `drawImage` that made long sessions crawl. Hot
+loops allocate nothing per step (`carGrid` hash, A* typed arrays and heap, `hyp` instead of `Math.hypot`), and per-frame scans only visit the
+tiles near the view. Soak test: open `/?debug&heat=3`, run `scripts/soak-bot.js` in the page, and read `window.__soak` (frame time, work time,
+`canvasMB()` and heap every 10 s); frame time, canvas memory (under about 5 MB) and heap stay flat.
+
 Police tactics (`ai/tactics.ts`): from heat 2 the dispatcher predicts where you are heading (the road you are on and its straight
 continuation) and sends pursuers that can get there first to park across the lanes (amber blinking dots on the minimap). Interceptors
 give up if you turn away or get past them. `heat.tactics = false` turns this off for A/B comparisons.

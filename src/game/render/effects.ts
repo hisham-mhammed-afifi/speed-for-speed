@@ -1,3 +1,4 @@
+import { CPU_CANVAS } from '../core/canvas'
 import { quality } from './quality'
 import type { Car } from '../physics/car'
 import type { Vec2 } from '../types'
@@ -5,7 +6,7 @@ import type { Vec2 } from '../types'
 function glowSprite(r: number, g: number, b: number, size = 64): HTMLCanvasElement {
   const c = document.createElement('canvas')
   c.width = c.height = size
-  const x = c.getContext('2d')!
+  const x = c.getContext('2d', CPU_CANVAS)!
   const h = c.width / 2
   const gr = x.createRadialGradient(h, h, 0, h, h, h)
   gr.addColorStop(0, `rgba(${r},${g},${b},1)`)
@@ -36,6 +37,8 @@ interface Particle {
 interface SkidChunk {
   cv: HTMLCanvasElement
   ctx: CanvasRenderingContext2D
+  cx: number
+  cy: number
 }
 
 export interface Visible {
@@ -45,8 +48,11 @@ export interface Visible {
   y1: number
 }
 
-const CH = 170 // metres per skid-mark chunk
-const PPM = 3 // skid-mark pixels per metre
+// Skid marks live in a few small canvases. Canvas memory is not in the JS heap and phones cap it hard, so it must stay bounded:
+// at most MAX_CHUNKS chunks of 256 x 256 px (about 0.26 MB each), and the one farthest from where marks are being laid is recycled.
+const CH = 128 // metres per skid-mark chunk
+const PPM = 2 // skid-mark pixels per metre
+const MAX_CHUNKS = 12
 const MAX = 800
 
 const parts: Particle[] = []
@@ -75,12 +81,29 @@ function chunk(cx: number, cy: number, create: boolean): SkidChunk | undefined {
   const k = cx + ',' + cy
   let c = skids.get(k)
   if (!c && create) {
-    if (skids.size > 40) skids.delete(skids.keys().next().value as string)
-    const cv = document.createElement('canvas')
-    cv.width = cv.height = Math.round(CH * PPM)
-    const ctx = cv.getContext('2d')!
-    ctx.lineCap = 'round'
-    c = { cv, ctx }
+    if (skids.size >= MAX_CHUNKS) {
+      // recycle the farthest chunk: wipe its canvas and re-key it, instead of creating (and later leaking) another canvas
+      let fk = '',
+        fd = -1
+      for (const [kk, v] of skids) {
+        const d = (v.cx - cx) * (v.cx - cx) + (v.cy - cy) * (v.cy - cy)
+        if (d > fd) {
+          fd = d
+          fk = kk
+        }
+      }
+      c = skids.get(fk)!
+      skids.delete(fk)
+      c.ctx.clearRect(0, 0, c.cv.width, c.cv.height)
+      c.cx = cx
+      c.cy = cy
+    } else {
+      const cv = document.createElement('canvas')
+      cv.width = cv.height = Math.round(CH * PPM)
+      const ctx = cv.getContext('2d', CPU_CANVAS)!
+      ctx.lineCap = 'round'
+      c = { cv, ctx, cx, cy }
+    }
     skids.set(k, c)
   }
   return c
@@ -204,8 +227,16 @@ export const FX = {
   },
 
   clearSkids(): void {
+    for (const c of skids.values()) c.cv.width = c.cv.height = 0 // release the backing store now, not whenever the GC gets to it
     skids.clear()
     parts.length = 0
+  },
+
+  /** Pixels of live offscreen canvas memory owned by the effects (4 bytes each); for the debug overlay and the soak test. */
+  canvasPixels(): number {
+    let n = 0
+    for (const c of skids.values()) n += c.cv.width * c.cv.height
+    return n
   },
 
   drawSkids(ctx: CanvasRenderingContext2D, vis: Visible): void {
@@ -224,13 +255,14 @@ export const FX = {
   carEffects(car: Car, dt: number): void {
     const s = car.spec
     const sk = car.skid
+    const marks = quality.spec.skidsAll || car.kind === 'player' // on the low tier only the player leaves skid marks
     if (sk > 0.12) {
       for (let w = 0; w < 2; w++) {
         const ly = (w ? 1 : -1) * 0.82
         car.toWorld(-s.len * 0.3, ly, tmp)
         const px = car.wp[w * 2],
           py = car.wp[w * 2 + 1]
-        if (!isNaN(px)) FX.skid(px, py, tmp.x, tmp.y, 0.3, 0.12 + sk * 0.38)
+        if (marks && !isNaN(px)) FX.skid(px, py, tmp.x, tmp.y, 0.3, 0.12 + sk * 0.38)
         car.wp[w * 2] = tmp.x
         car.wp[w * 2 + 1] = tmp.y
         if (Math.random() < dt * 70 * sk) FX.smoke(tmp.x, tmp.y, car.wvx * 0.25, car.wvy * 0.25, 0.7 + sk * 0.6, 0.45 * sk + 0.1)

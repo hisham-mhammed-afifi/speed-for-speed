@@ -1,3 +1,4 @@
+import { hyp } from '../core/math'
 import { Difficulty } from './difficulty'
 import { findPath } from './pathfind'
 import { game } from '../state'
@@ -26,7 +27,7 @@ function edgeIntercept(city: City, n0: number, n1: number, alongPl: number, from
     y0 = city.nodeY(n0)
   const ex = city.nodeX(n1) - x0,
     ey = city.nodeY(n1) - y0
-  const len = Math.hypot(ex, ey)
+  const len = hyp(ex, ey)
   if (len < 40) return null
   const along = Math.min(len - 14, Math.max(20, Math.max(alongPl + 90, len * 0.6)))
   const ahead = along - alongPl
@@ -47,7 +48,7 @@ function edgeIntercept(city: City, n0: number, n1: number, alongPl: number, from
  * intersection (people mostly keep going straight). Empty when they are too slow to predict.
  */
 export function predictRoute(city: City, px: number, py: number, vx: number, vy: number): Intercept[] {
-  const speed = Math.hypot(vx, vy)
+  const speed = hyp(vx, vy)
   if (speed < 8) return []
   const ux = vx / speed,
     uy = vy / speed
@@ -59,7 +60,7 @@ export function predictRoute(city: City, px: number, py: number, vx: number, vy:
   for (const b of city.neighbors(a)) {
     const ex = city.nodeX(b) - city.nodeX(a),
       ey = city.nodeY(b) - city.nodeY(a)
-    const l = Math.hypot(ex, ey)
+    const l = hyp(ex, ey)
     const dot = (ex * ux + ey * uy) / l
     const along = ((px - city.nodeX(a)) * ex + (py - city.nodeY(a)) * ey) / l
     if (dot > best && along < l - 15) {
@@ -80,14 +81,14 @@ export function predictRoute(city: City, px: number, py: number, vx: number, vy:
   for (let k = 0; k < 3; k++) {
     const sx = city.nodeX(cur) - city.nodeX(prev),
       sy = city.nodeY(cur) - city.nodeY(prev)
-    const sl = Math.hypot(sx, sy)
+    const sl = hyp(sx, sy)
     let nxt = -1
     best = 0.85
     for (const c of city.neighbors(cur)) {
       if (c === prev) continue
       const ex = city.nodeX(c) - city.nodeX(cur),
         ey = city.nodeY(c) - city.nodeY(cur)
-      const dot = (ex * sx + ey * sy) / (Math.hypot(ex, ey) * sl)
+      const dot = (ex * sx + ey * sy) / (hyp(ex, ey) * sl)
       if (dot > best) {
         best = dot
         nxt = c
@@ -96,7 +97,7 @@ export function predictRoute(city: City, px: number, py: number, vx: number, vy:
     if (nxt < 0) break
     const e = edgeIntercept(city, cur, nxt, 0, fromLen, speed)
     if (e) out.push(e)
-    fromLen += Math.hypot(city.nodeX(nxt) - city.nodeX(cur), city.nodeY(nxt) - city.nodeY(cur))
+    fromLen += hyp(city.nodeX(nxt) - city.nodeX(cur), city.nodeY(nxt) - city.nodeY(cur))
     prev = cur
     cur = nxt
   }
@@ -107,7 +108,7 @@ const clampUnit = (v: number) => Math.max(-1, Math.min(1, v))
 
 function pathLength(city: City, path: number[]): number {
   let L = 0
-  for (let i = 1; i < path.length; i++) L += Math.hypot(city.nodeX(path[i]) - city.nodeX(path[i - 1]), city.nodeY(path[i]) - city.nodeY(path[i - 1]))
+  for (let i = 1; i < path.length; i++) L += hyp(city.nodeX(path[i]) - city.nodeX(path[i - 1]), city.nodeY(path[i]) - city.nodeY(path[i - 1]))
   return L
 }
 
@@ -135,7 +136,7 @@ export const Tactics = {
     // the closest pursuer keeps chasing; the rest are candidates
     const cand = units
       .filter((u) => u.state === 'pursue' && u.icCool <= 0)
-      .map((u) => ({ u, d: Math.hypot(u.car.x - pl.x, u.car.y - pl.y) }))
+      .map((u) => ({ u, d: hyp(u.car.x - pl.x, u.car.y - pl.y) }))
       .sort((p, q) => p.d - q.d)
       .slice(1)
       .filter((c) => c.d > 45 && c.d < 420)
@@ -159,12 +160,12 @@ export const Tactics = {
         const behind =
           path.length > 1 &&
           ((city.nodeX(path[0]) - car.x) * Math.cos(car.theta) + (city.nodeY(path[0]) - car.y) * Math.sin(car.theta) < 0 ||
-            Math.hypot(city.nodeX(path[0]) - car.x, city.nodeY(path[0]) - car.y) < 18)
+            hyp(city.nodeX(path[0]) - car.x, city.nodeY(path[0]) - car.y) < 18)
         // facing away from the first node costs a slow turn-around
         const tn = behind ? path[1] : path[0]
         const hx = city.nodeX(tn) - car.x,
           hy = city.nodeY(tn) - car.y
-        const ang = Math.acos(clampUnit((hx * Math.cos(car.theta) + hy * Math.sin(car.theta)) / (Math.hypot(hx, hy) || 1)))
+        const ang = Math.acos(clampUnit((hx * Math.cos(car.theta) + hy * Math.sin(car.theta)) / (hyp(hx, hy) || 1)))
         const t = pathLength(city, path) / COP_SPEED + 1 + (ang > 1.4 ? 6 : ang > 0.7 ? 2 : 0)
         if (t < r.eta && t < bestT) {
           bestSkip = behind

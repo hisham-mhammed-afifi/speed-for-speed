@@ -1,4 +1,4 @@
-import { clamp } from '../core/math'
+import { clamp, hyp } from '../core/math'
 import { Phys } from '../physics/world'
 import { game } from '../state'
 import { Difficulty } from './difficulty'
@@ -155,7 +155,7 @@ export class HeatManager {
     game.toast('PURSUIT: ' + reason, '#ff4d4d')
     if (Difficulty.k.s > 0.6) game.toast('MOST WANTED: EXTRA UNITS', '#ff9a3c')
     for (const u of game.cops) {
-      if (u.state === 'patrol' && Math.hypot(u.car.x - pl.x, u.car.y - pl.y) < 420) {
+      if (u.state === 'patrol' && hyp(u.car.x - pl.x, u.car.y - pl.y) < 420) {
         u.state = 'pursue'
         u.role = 'ram'
         u.path = null
@@ -211,7 +211,7 @@ export class HeatManager {
       for (const c of Memory.hot()) {
         const dx = c.x - pl.x,
           dy = c.y - pl.y,
-          d = Math.hypot(dx, dy)
+          d = hyp(dx, dy)
         if (d < 120 || d > 420) continue
         const dot = (dx * hx + dy * hy) / d
         if (dot < 0.6) continue
@@ -226,7 +226,7 @@ export class HeatManager {
         let to = -1,
           bd = 1e9
         for (const m of city.neighbors(n)) {
-          const d = Math.hypot(city.nodeX(m) - pl.x, city.nodeY(m) - pl.y)
+          const d = hyp(city.nodeX(m) - pl.x, city.nodeY(m) - pl.y)
           if (d < bd) {
             bd = d
             to = m
@@ -285,7 +285,7 @@ export class HeatManager {
       const n = city.randomNodeNear(pl.x, pl.y, Difficulty.k.spawnMin, Difficulty.k.spawnMax)
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
-      const d = Math.hypot(nx - pl.x, ny - pl.y)
+      const d = hyp(nx - pl.x, ny - pl.y)
       if (d < Difficulty.k.spawnMin || d > Difficulty.k.spawnMax) continue
       const hidden = !city.hasLOS(nx, ny, pl.x, pl.y)
       if (!hidden && tries < 14) continue
@@ -297,7 +297,7 @@ export class HeatManager {
     let to = nb[0],
       bd = 1e9
     for (const n of nb) {
-      const d = Math.hypot(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
+      const d = hyp(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
       if (d < bd) {
         bd = d
         to = n
@@ -332,7 +332,7 @@ export class HeatManager {
     for (const u of game.cops) {
       if (u.state !== 'pursue' && u.state !== 'intercept') continue
       pursuers++
-      const d = Math.hypot(u.car.x - pl.x, u.car.y - pl.y)
+      const d = hyp(u.car.x - pl.x, u.car.y - pl.y)
       if ((u.state === 'pursue' && u.los && d < 130) || d < 70) visible = true // a cop right beside you counts even without line of sight
       if (d < 14) near++
     }
@@ -360,14 +360,14 @@ export class HeatManager {
       }
       const dx = tx - h.x,
         dy = ty - h.y,
-        d = Math.hypot(dx, dy) || 1
+        d = hyp(dx, dy) || 1
       const sp = Math.min(h.life > 0 ? 44 : 60, d * 1.4)
       h.vx += ((dx / d) * sp - h.vx) * Math.min(1, dt * 1.6)
       h.vy += ((dy / d) * sp - h.vy) * Math.min(1, dt * 1.6)
       h.x += h.vx * dt
       h.y += h.vy * dt
-      if (h.life > 0 && Math.hypot(h.x - pl.x, h.y - pl.y) < 20 && !game.city.inTunnel(pl.x, pl.y)) this.heliLit = true // a tunnel hides you from the spotlight
-      if (h.life <= 0 && Math.hypot(h.x - pl.x, h.y - pl.y) > 700) {
+      if (h.life > 0 && hyp(h.x - pl.x, h.y - pl.y) < 20 && !game.city.inTunnel(pl.x, pl.y)) this.heliLit = true // a tunnel hides you from the spotlight
+      if (h.life <= 0 && hyp(h.x - pl.x, h.y - pl.y) > 700) {
         this.heli = null
         this.heliT = 40
       }
@@ -410,7 +410,7 @@ export class HeatManager {
     if (this.roleT <= 0) {
       this.roleT = 1
       const list = game.cops.filter((u) => u.state === 'pursue')
-      list.sort((a, b) => Math.hypot(a.car.x - pl.x, a.car.y - pl.y) - Math.hypot(b.car.x - pl.x, b.car.y - pl.y))
+      list.sort((a, b) => hyp(a.car.x - pl.x, a.car.y - pl.y) - hyp(b.car.x - pl.x, b.car.y - pl.y))
       let side = 1
       list.forEach((u, i) => {
         if (i === 0) u.role = 'ram'
@@ -457,7 +457,7 @@ export class HeatManager {
         game.toast('TIRES SHREDDED', '#ff4d4d')
         game.shake(0.5)
       }
-      if (Math.hypot(pl.x - s.x, pl.y - s.y) > 600) this.spikes.splice(i, 1)
+      if (hyp(pl.x - s.x, pl.y - s.y) > 600) this.spikes.splice(i, 1)
     }
     for (let i = this.blocks.length - 1; i >= 0; i--) {
       if (!this.blocks[i].units.some((u) => game.cops.includes(u))) this.blocks.splice(i, 1)

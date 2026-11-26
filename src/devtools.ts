@@ -8,6 +8,7 @@ import { input } from './game/core/input'
 import { loop } from './game/core/loop'
 import { Phys } from './game/physics/world'
 import { camera } from './game/render/camera'
+import { FX } from './game/render/effects'
 import { Renderer } from './game/render/renderer'
 import { game } from './game/state'
 import { Props } from './game/world/props'
@@ -37,6 +38,13 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     Renderer,
     Props,
     World,
+    FX,
+    /** megabytes of offscreen canvas memory the game holds (skid chunks + minimap tiles); it is outside the JS heap, so watch it here */
+    canvasMB: () => {
+      let px = FX.canvasPixels()
+      for (const t of World.cache.values()) if (t.map) px += t.map.width * t.map.height
+      return +((px * 4) / 1e6).toFixed(2)
+    },
     Tactics,
     Memory,
     quality,

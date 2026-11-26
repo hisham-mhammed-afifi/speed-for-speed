@@ -1,3 +1,4 @@
+import { CPU_CANVAS } from '../core/canvas'
 import { clamp } from '../core/math'
 import { Memory } from '../ai/memory'
 import { touch } from '../core/input'
@@ -12,7 +13,7 @@ import type { Tile } from '../world/city'
 // Per-frame HUD pieces that are drawn on the game canvas: speedometer, minimap, phone speed panel, debug text.
 // Static text (heat stars, bounty, toasts, hints) lives in React (src/ui/hud/HudOverlay.tsx).
 
-const MAP_SCALE = 0.3
+const MAP_SCALE = 0.2
 let fps = 60
 
 /** The minimap picture of one tile (blocks tinted by district, buildings, water, bridges, tunnels, highways), made the first time it is drawn. */
@@ -22,7 +23,7 @@ function tileMap(t: Tile): HTMLCanvasElement {
   const cv = document.createElement('canvas')
   cv.width = Math.ceil((t.x1 - t.x0) * k)
   cv.height = Math.ceil((t.y1 - t.y0) * k)
-  const x = cv.getContext('2d')!
+  const x = cv.getContext('2d', CPU_CANVAS)!
   x.fillStyle = '#4a4f58'
   x.fillRect(0, 0, cv.width, cv.height)
   x.scale(k, k)
@@ -91,7 +92,7 @@ function layer(old: Layer | null, w: number, h: number, dpr: number): Layer {
   const cv = document.createElement('canvas')
   cv.width = Math.max(1, Math.ceil(w * dpr))
   cv.height = Math.max(1, Math.ceil(h * dpr))
-  const c = cv.getContext('2d')!
+  const c = cv.getContext('2d', CPU_CANVAS)!
   c.setTransform(dpr, 0, 0, dpr, 0, 0)
   return { cv, c, w, h, dpr, key: '' }
 }

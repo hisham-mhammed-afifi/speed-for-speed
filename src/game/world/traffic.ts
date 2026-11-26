@@ -1,4 +1,4 @@
-import { clamp, pick } from '../core/math'
+import { clamp, hyp, pick } from '../core/math'
 import { avoid, capForTraffic, speedTo, steerTo } from '../ai/drive'
 import { TRAFFIC_CARS } from '../data/cars'
 import { game } from '../state'
@@ -52,7 +52,7 @@ export class LaneDriver {
       pb = { x: city.nodeX(this.b), y: city.nodeY(this.b) }
     let dx = pb.x - pa.x,
       dy = pb.y - pa.y,
-      len = Math.hypot(dx, dy) || 1
+      len = hyp(dx, dy) || 1
     let ux = dx / len,
       uy = dy / len
     let t = (car.x - pa.x) * ux + (car.y - pa.y) * uy
@@ -61,7 +61,7 @@ export class LaneDriver {
       this.next = this.pickNext()
       const cx = city.nodeX(this.next) - pb.x,
         cy = city.nodeY(this.next) - pb.y
-      this.turnSlow = Math.abs(cx * ux + cy * uy) < 0.5 * Math.hypot(cx, cy) // a turn, not straight on
+      this.turnSlow = Math.abs(cx * ux + cy * uy) < 0.5 * hyp(cx, cy) // a turn, not straight on
     }
     if (toEnd < city.nodeHalfWidth(this.b) * 0.6 + 3 && this.next >= 0) {
       this.a = this.b
@@ -72,7 +72,7 @@ export class LaneDriver {
       pb = { x: city.nodeX(this.b), y: city.nodeY(this.b) }
       dx = pb.x - pa.x
       dy = pb.y - pa.y
-      len = Math.hypot(dx, dy) || 1
+      len = hyp(dx, dy) || 1
       ux = dx / len
       uy = dy / len
       t = (car.x - pa.x) * ux + (car.y - pa.y) * uy
@@ -137,7 +137,7 @@ export const Traffic = {
     for (let i = game.civs.length - 1; i >= 0; i--) {
       const u = game.civs[i],
         car = u.car
-      const d = Math.hypot(car.x - pl.x, car.y - pl.y)
+      const d = hyp(car.x - pl.x, car.y - pl.y)
       // civilians think at 60 Hz (every other step), far ones at 30 Hz; their last controls simply carry over
       const far = d > 250
       if (((i + Traffic.tick) & (far ? 3 : 1)) !== 0 && car.health > 0) continue
@@ -194,7 +194,7 @@ export const Traffic = {
       const n = city.randomNodeNear(pl.x, pl.y, 150, 360) // the world is endless: pick near the player, not anywhere
       const nx = city.nodeX(n),
         ny = city.nodeY(n)
-      const d = Math.hypot(nx - pl.x, ny - pl.y)
+      const d = hyp(nx - pl.x, ny - pl.y)
       if (d < 150 || d > 360) continue
       if (Math.random() > TRAFFIC_WEIGHT[city.districtAt(nx, ny)]) continue // busy downtown, sparse suburbs
       const nb = city.neighbors(n)

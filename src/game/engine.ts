@@ -4,7 +4,7 @@ import { Police } from './ai/police'
 import { loadImages } from './core/assets'
 import { input, touch } from './core/input'
 import { loop, startLoop } from './core/loop'
-import { clamp } from './core/math'
+import { clamp, hyp } from './core/math'
 import { readSafeArea } from './core/viewport'
 import { ALL_CAR_FILES, PLAYER_CARS } from './data/cars'
 import { WORLD_FILES } from './world/worldArt'
@@ -18,7 +18,9 @@ import { loadSave, writeSave } from './save'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
+import { MAIN_CANVAS } from './core/canvas'
 import { LANE_OFFSET, TILE } from './world/city'
+import type { City } from './world/city'
 import { World } from './world/world'
 import { Traffic } from './world/traffic'
 import { Difficulty } from './ai/difficulty'
@@ -61,7 +63,7 @@ class GameEngine {
   /** Attach to a canvas and start the loop. Returns a function that detaches again (safe under React StrictMode). */
   mount(canvas: HTMLCanvasElement): () => void {
     this.canvas = canvas
-    this.ctx = canvas.getContext('2d')!
+    this.ctx = canvas.getContext('2d', MAIN_CANVAS)!
     this.params = new URLSearchParams(location.search)
     let stopLoop: (() => void) | null = null
     let detached = false
@@ -165,7 +167,7 @@ class GameEngine {
       Phys.removeCar(car)
     }
     game.spotFree = (x, y, r) => {
-      for (let i = 0; i < game.cars.length; i++) if (Math.hypot(game.cars[i].x - x, game.cars[i].y - y) < r) return false
+      for (let i = 0; i < game.cars.length; i++) if (hyp(game.cars[i].x - x, game.cars[i].y - y) < r) return false
       return !game.city.isObstacle(x, y)
     }
     game.onPropHit = (car, spot, speed, x, y) => {
@@ -202,7 +204,7 @@ class GameEngine {
         if (other.kind === 'police' && !heat.active && dv > 1) heat.start('COLLISION')
         else if (other.kind === 'civil' && dv > 3) {
           if (heat.active) heat.onCivilCrash()
-          else if (game.cops.some((u) => u.state === 'patrol' && Math.hypot(u.car.x - pl.x, u.car.y - pl.y) < 140 && game.city.hasLOS(u.car.x, u.car.y, pl.x, pl.y)))
+          else if (game.cops.some((u) => u.state === 'patrol' && hyp(u.car.x - pl.x, u.car.y - pl.y) < 140 && game.city.hasLOS(u.car.x, u.car.y, pl.x, pl.y)))
             heat.start('RECKLESS DRIVING')
         }
       }
@@ -387,9 +389,20 @@ class GameEngine {
     camera.snap()
   }
 
+  /** Free the minimap images of tiles that left the window (canvas memory is outside the JS heap, so it needs freeing by hand). */
+  private releaseMaps(old: City, next: City): void {
+    for (const t of old.tiles)
+      if (t.map && !next.tiles.includes(t)) {
+        t.map.width = t.map.height = 0
+        t.map = null
+      }
+  }
+
   /** Put the world window around tile (cx, cy) with nothing on the road (a fresh run). */
   private setWindow(cx: number, cy: number): void {
-    game.city = World.build(cx, cy, 1)
+    const next = World.build(cx, cy, 1)
+    this.releaseMaps(game.city, next)
+    game.city = next
     this.cx = cx
     this.cy = cy
     Phys.setStatics(game.city.statics, 0, 0)
@@ -403,6 +416,7 @@ class GameEngine {
   private recenter(ncx: number, ncy: number): void {
     const old = game.city
     const next = World.build(ncx, ncy, 1)
+    this.releaseMaps(old, next)
     const di = (old.tx0 - next.tx0) * TILE,
       dj = (old.ty0 - next.ty0) * TILE
     const map = (id: number): number => {

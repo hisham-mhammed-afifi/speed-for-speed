@@ -1,33 +1,35 @@
 import type { Car } from '../physics/car'
 
 /**
- * Uniform spatial grid of cars, rebuilt every physics step. AI that asks "who is near me?" (traffic cones,
+ * Uniform spatial hash of cars, rebuilt every physics step. AI that asks "who is near me?" (traffic cones,
  * intersection checks) reads a few cells instead of looping over every car in the world, which keeps a
  * busy city (60+ cars) cheap.
+ *
+ * It allocates nothing per step: cells hash into a fixed table of bucket heads, and cars chain through a
+ * reused `next` array. Two cells may share a bucket; that only adds candidates, and `query` filters by distance.
  */
 const CELL = 24 // metres; a car is ~5 m long, so a car only ever spans two cells
+const BUCKETS = 4096 // power of two
 
-const index = new Map<number, number>() // cell key -> slot in `cells`
-const cells: Car[][] = []
-let used = 0
+const heads = new Int32Array(BUCKETS)
+const seen = new Uint32Array(BUCKETS)
+let next = new Int32Array(256)
+let list: Car[] = []
+let stamp = 0
 
-const key = (ix: number, iy: number) => (ix + 1000) * 4096 + (iy + 1000)
+const bucket = (ix: number, iy: number) => (Math.imul(ix, 73856093) ^ Math.imul(iy, 19349663)) & (BUCKETS - 1)
 
 export const carGrid = {
   rebuild(cars: readonly Car[]): void {
-    index.clear()
-    used = 0
+    heads.fill(-1)
+    if (next.length < cars.length) next = new Int32Array(cars.length * 2)
+    list.length = cars.length
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i]
-      const k = key(Math.floor(c.x / CELL), Math.floor(c.y / CELL))
-      let slot = index.get(k)
-      if (slot === undefined) {
-        slot = used++
-        if (!cells[slot]) cells[slot] = []
-        cells[slot].length = 0
-        index.set(k, slot)
-      }
-      cells[slot].push(c)
+      list[i] = c
+      const b = bucket(Math.floor(c.x / CELL), Math.floor(c.y / CELL))
+      next[i] = heads[b]
+      heads[b] = i
     }
   },
 
@@ -39,12 +41,13 @@ export const carGrid = {
       iy0 = Math.floor((y - r) / CELL),
       iy1 = Math.floor((y + r) / CELL)
     const r2 = r * r
+    const st = ++stamp >>> 0
     for (let iy = iy0; iy <= iy1; iy++)
       for (let ix = ix0; ix <= ix1; ix++) {
-        const slot = index.get(key(ix, iy))
-        if (slot === undefined) continue
-        const list = cells[slot]
-        for (let k = 0; k < list.length; k++) {
+        const b = bucket(ix, iy)
+        if (seen[b] === st) continue // two of the query's cells hashed to the same bucket: its cars were already checked
+        seen[b] = st
+        for (let k = heads[b]; k >= 0; k = next[k]) {
           const c = list[k]
           const dx = c.x - x,
             dy = c.y - y

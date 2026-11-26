@@ -1,4 +1,4 @@
-import { clamp } from '../core/math'
+import { clamp, hyp } from '../core/math'
 import { avoid, speedTo, steerTo } from './drive'
 import { Difficulty } from './difficulty'
 import { Memory } from './memory'
@@ -94,7 +94,7 @@ export const Police = {
     for (const n of nb) {
       const dx = city.nodeX(n) - car.x,
         dy = city.nodeY(n) - car.y
-      const d = (dx * fx + dy * fy) / (Math.hypot(dx, dy) || 1)
+      const d = (dx * fx + dy * fy) / (hyp(dx, dy) || 1)
       if (d > bd) {
         bd = d
         best = n
@@ -110,7 +110,7 @@ export const Police = {
       pl = game.player.car
     for (let tries = 0; tries < 10; tries++) {
       const n = city.randomNodeNear(pl.x, pl.y, 180, 420)
-      const d = Math.hypot(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
+      const d = hyp(city.nodeX(n) - pl.x, city.nodeY(n) - pl.y)
       if (d < 180 || d > 420) continue
       // fewer patrols out in the suburbs, plenty downtown and on the highway
       if (city.districtAt(city.nodeX(n), city.nodeY(n)) === 'suburbs' && Math.random() < 0.6) continue
@@ -134,7 +134,7 @@ export const Police = {
       const u = game.cops[i],
         car = u.car
       const think = ((i + Police.tick) & 1) === 0 // this unit's controls are refreshed this step (the rest carry over)
-      const d = Math.hypot(car.x - pl.x, car.y - pl.y)
+      const d = hyp(car.x - pl.x, car.y - pl.y)
       if (car.health <= 0 && u.state !== 'wrecked') {
         u.state = 'wrecked'
         u.wreckT = 0
@@ -281,7 +281,7 @@ export const Police = {
         const g = u.goal !== undefined && dist > 220 ? u.goal : dist < 220 ? city.nearestNode(pl.x, pl.y) : city.nearestNode(H.lastX, H.lastY)
         u.path = findPath(city, s, g) || [s]
         u.pi = 0
-        if (u.path.length > 1 && Math.hypot(city.nodeX(u.path[0]) - car.x, city.nodeY(u.path[0]) - car.y) < 18) u.pi = 1
+        if (u.path.length > 1 && hyp(city.nodeX(u.path[0]) - car.x, city.nodeY(u.path[0]) - car.y) < 18) u.pi = 1
       }
       const path = u.path
       const last = path.length - 1
@@ -289,13 +289,13 @@ export const Police = {
       let nx = city.nodeX(nid),
         ny = city.nodeY(nid)
       const advR = 10 + car.speed * 0.45
-      if (Math.hypot(nx - car.x, ny - car.y) < advR) {
+      if (hyp(nx - car.x, ny - car.y) < advR) {
         if (u.pi < last) {
           u.pi++
           nid = path[u.pi]
           nx = city.nodeX(nid)
           ny = city.nodeY(nid)
-        } else if (Math.hypot(nx - car.x, ny - car.y) < 20) {
+        } else if (hyp(nx - car.x, ny - car.y) < 20) {
           // arrived: search a random node near the last known position
           const t = Math.random() < 0.7 ? Memory.pick(H.lastX, H.lastY) : null
           if (t) {
@@ -316,10 +316,10 @@ export const Police = {
           ay = ny - car.y,
           bx = city.nodeX(n2) - nx,
           by = city.nodeY(n2) - ny
-        const cosA = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) + 1e-6)
+        const cosA = (ax * bx + ay * by) / (hyp(ax, ay) * hyp(bx, by) + 1e-6)
         if (cosA < 0.6) {
           // brake for the corner: v^2 = vCorner^2 + 2*a*(distance to brake)
-          const dd = Math.hypot(ax, ay)
+          const dd = hyp(ax, ay)
           tspeed = Math.min(tspeed, Math.sqrt(8.5 * 8.5 + 2 * 9 * Math.max(dd - 14, 0)))
         }
       } else tspeed = 14
@@ -362,10 +362,10 @@ export const Police = {
       ic = u.ic
     if (!ic || !u.path) return Police.endIntercept(u, 'no-target')
     u.icT += dt
-    const wpDist = Math.hypot(ic.wx - car.x, ic.wy - car.y)
+    const wpDist = hyp(ic.wx - car.x, ic.wy - car.y)
     // how far the player still has to go to reach the spot (negative: they got past)
     const plAhead = (ic.wx - pl.x) * ic.dx + (ic.wy - pl.y) * ic.dy
-    const turnedAway = pl.speed > 8 && pl.wvx * ic.dx + pl.wvy * ic.dy < pl.speed * 0.3 && Math.hypot(ic.wx - pl.x, ic.wy - pl.y) > 50
+    const turnedAway = pl.speed > 8 && pl.wvx * ic.dx + pl.wvy * ic.dy < pl.speed * 0.3 && hyp(ic.wx - pl.x, ic.wy - pl.y) > 50
     if (u.icT > 28) return Police.endIntercept(u, 'timeout')
     if (plAhead < -10) return Police.endIntercept(u, 'player-passed')
     if (turnedAway) return Police.endIntercept(u, 'player-turned')
@@ -384,13 +384,13 @@ export const Police = {
     const path = u.path,
       last = path.length - 1
     let tx: number, ty: number, tspeed: number
-    if (u.pi >= last && Math.hypot(city.nodeX(path[last]) - car.x, city.nodeY(path[last]) - car.y) < 25) u.icArrived = true
+    if (u.pi >= last && hyp(city.nodeX(path[last]) - car.x, city.nodeY(path[last]) - car.y) < 25) u.icArrived = true
     if (!u.icArrived) {
       // follow the road graph to the far end of the block
       let nid = path[Math.min(u.pi, last)]
       let nx = city.nodeX(nid),
         ny = city.nodeY(nid)
-      if (Math.hypot(nx - car.x, ny - car.y) < 10 + car.speed * 0.45 && u.pi < last) {
+      if (hyp(nx - car.x, ny - car.y) < 10 + car.speed * 0.45 && u.pi < last) {
         u.pi++
         nid = path[u.pi]
         nx = city.nodeX(nid)
@@ -405,8 +405,8 @@ export const Police = {
           ay = ny - car.y,
           bx = city.nodeX(n2) - nx,
           by = city.nodeY(n2) - ny
-        if ((ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) + 1e-6) < 0.6)
-          tspeed = Math.min(tspeed, Math.sqrt(72 + 18 * Math.max(Math.hypot(ax, ay) - 14, 0)))
+        if ((ax * bx + ay * by) / (hyp(ax, ay) * hyp(bx, by) + 1e-6) < 0.6)
+          tspeed = Math.min(tspeed, Math.sqrt(72 + 18 * Math.max(hyp(ax, ay) - 14, 0)))
       }
     } else {
       tx = ic.wx

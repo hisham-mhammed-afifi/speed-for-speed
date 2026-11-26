@@ -1,4 +1,4 @@
-import { clamp, damp, wrapAngle } from '../core/math'
+import { clamp, damp, hyp, wrapAngle } from '../core/math'
 import { touch } from '../core/input'
 import type { Car } from '../physics/car'
 import type { Visible } from './effects'
@@ -60,7 +60,7 @@ export const camera = {
     ctx.rotate(camera.angle)
     ctx.scale(s, s)
     ctx.translate(-camera.x, -camera.y)
-    const r = Math.hypot(W, H) / 2 / s + 6
+    const r = hyp(W, H) / 2 / s + 6
     const v = camera.vis
     v.x0 = camera.x - r
     v.x1 = camera.x + r

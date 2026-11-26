@@ -2,6 +2,9 @@ export const TAU = Math.PI * 2
 
 export const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v)
 
+/** sqrt(a*a + b*b): Math.hypot is variadic and noticeably slower (and allocates) on hot paths. */
+export const hyp = (a: number, b: number): number => Math.sqrt(a * a + b * b)
+
 export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
 export const wrapAngle = (a: number): number => {

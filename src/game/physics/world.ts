@@ -36,6 +36,9 @@ function staticBody(r: StaticRec): Matter.Body {
   return r.body as Matter.Body
 }
 
+const addBuf: Matter.Body[] = []
+const removeBuf: Matter.Body[] = []
+
 /** Static colliders within this many metres of the player are live. Traffic despawns at 420 m, pursuers at 420-700 m. */
 const STATIC_RADIUS = 520
 
@@ -104,23 +107,26 @@ export const Phys = {
     const world = Phys.engine?.world
     if (!world) return
     const R: number = radius ?? Phys.radius
-    const add: Matter.Body[] = [],
-      remove: Matter.Body[] = []
-    for (let i = 0; i < Phys.statics.length; i++) {
-      const s = Phys.statics[i]
+    const enter = R * R,
+      leave = (R + 80) * (R + 80)
+    addBuf.length = 0
+    removeBuf.length = 0
+    const statics = Phys.statics
+    for (let i = 0; i < statics.length; i++) {
+      const s = statics[i]
       const dx = Math.max(Math.abs(x - s.cx) - s.hx, 0),
         dy = Math.max(Math.abs(y - s.cy) - s.hy, 0)
-      const d = Math.hypot(dx, dy)
-      if (!s.on && (s.always || d <= R)) {
+      const d2 = dx * dx + dy * dy
+      if (!s.on && (s.always || d2 <= enter)) {
         s.on = true
-        add.push(staticBody(s))
-      } else if (s.on && !s.always && d > R + 80) {
+        addBuf.push(staticBody(s))
+      } else if (s.on && !s.always && d2 > leave) {
         s.on = false
-        remove.push(s.body as Matter.Body)
+        removeBuf.push(s.body as Matter.Body)
       }
     }
-    if (add.length) Composite.add(world, add)
-    if (remove.length) Composite.remove(world, remove)
+    if (addBuf.length) Composite.add(world, addBuf)
+    if (removeBuf.length) Composite.remove(world, removeBuf)
   },
 
   /** how many static colliders are currently in the physics world */

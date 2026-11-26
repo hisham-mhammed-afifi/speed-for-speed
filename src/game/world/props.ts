@@ -33,7 +33,6 @@ export const Props = {
   /** Stream props in and out around the player and retire smashed ones. */
   update(dt: number): void {
     const pl = game.player.car
-    const spots = game.city.propSpots
     for (const a of active.values()) {
       if (a.hitAge >= 0) a.hitAge += dt
       const dx = a.body.position.x / Phys.S - pl.x,
@@ -44,12 +43,18 @@ export const Props = {
         active.delete(a.spot)
       }
     }
-    for (let i = 0; i < spots.length; i++) {
-      const sp = spots[i]
-      if (sp.gone || active.has(sp)) continue
-      const dx = sp.x - pl.x,
-        dy = sp.y - pl.y
-      if (dx * dx + dy * dy < SPAWN_R * SPAWN_R) active.set(sp, { spot: sp, body: Phys.addProp(sp), hitAge: -1 })
+    const R2 = SPAWN_R * SPAWN_R
+    for (const t of game.city.tiles) {
+      // only the tiles that reach within spawn range: the window is nine tiles, almost all of them far away
+      if (t.x1 < pl.x - SPAWN_R || t.x0 > pl.x + SPAWN_R || t.y1 < pl.y - SPAWN_R || t.y0 > pl.y + SPAWN_R) continue
+      const spots = t.propSpots
+      for (let i = 0; i < spots.length; i++) {
+        const sp = spots[i]
+        if (sp.gone || active.has(sp)) continue
+        const dx = sp.x - pl.x,
+          dy = sp.y - pl.y
+        if (dx * dx + dy * dy < R2) active.set(sp, { spot: sp, body: Phys.addProp(sp), hitAge: -1 })
+      }
     }
   },
 
