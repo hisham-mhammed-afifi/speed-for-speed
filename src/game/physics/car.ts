@@ -54,6 +54,8 @@ export class Car {
   wp: number[] = [NaN, NaN, NaN, NaN] // last skid positions (rear wheels)
   flash = Math.random() * 6
   lastHit = -1
+  /** motorcycles: lean angle in radians (positive = to the rider's right), smoothed; drawn by the renderer */
+  lean = 0
   /** seconds of flight left (0 = on the ground); set by launch() at a jump ramp */
   air = 0
   airTotal = 0
@@ -119,6 +121,11 @@ export class Car {
     this.py = this.y
     this.pth = this.theta
     this.surfaceKind = surf.kind
+    if (s.bike) {
+      // lean until gravity and the sideways pull balance: tan(lean) = v * yaw rate / g
+      const want = this.air > 0 ? 0 : clamp(Math.atan2(Math.max(this.vx, 0) * this.w, 9.81), -0.75, 0.75)
+      this.lean += (want - this.lean) * Math.min(1, dt / 0.12)
+    }
     if (this.flat > 0) this.flat -= dt
     if (this.landT > 0) this.landT -= dt
     if (this.air > 0) {
@@ -170,7 +177,8 @@ export class Car {
     // ---- grip budget ----
     const health = this.health / 100
     const flat = this.flat > 0
-    const grip = s.grip * surf.grip * (flat ? 0.65 : 1) * (this.landT > 0 ? 0.5 : 1) * (0.85 + 0.15 * health)
+    const surfGrip = s.offroad && (surf.kind === 'grass' || surf.kind === 'gravel') ? Math.min(1, surf.grip * s.offroad) : surf.grip
+    const grip = s.grip * surfGrip * (flat ? 0.65 : 1) * (this.landT > 0 ? 0.5 : 1) * (0.85 + 0.15 * health)
 
     // ---- longitudinal ----
     const nitroWant = c.nitro > 0.5 && this.nitro > 0.02 && drive > 0 && vF > 1
@@ -184,7 +192,7 @@ export class Car {
     let aF = 0,
       wheelspin = 0
     if (drive > 0) {
-      const top = s.top * (nitroWant ? 1.12 : 1) * (surf.kind === 'grass' ? 0.6 : 1)
+      const top = s.top * (nitroWant ? 1.12 : 1) * (surf.kind === 'grass' ? (s.offroad ? 0.9 : 0.6) : 1)
       const ratio = clamp(vF / top, 0, 1.2)
       let a = drive * s.accel * Math.max(0, 1 - ratio * ratio)
       a *= (1 - 0.4 * (1 - health)) * this.boost * (nitroWant ? s.nitroPower : 1) * (flat ? 0.7 : 1)

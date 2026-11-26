@@ -20,6 +20,7 @@ import {
   estimate,
   PLAYER_CARS,
   POLICE_SPEC,
+  TRAFFIC_BIKES,
   TRAFFIC_CARS,
 } from "./data/cars";
 import { Car } from "./physics/car";
@@ -56,11 +57,12 @@ import {
 const DT = 1 / 120;
 
 describe("car data", () => {
-  it("has nine player cars plus a police car, all with sprites", () => {
-    expect(PLAYER_CARS).toHaveLength(9);
+  it("has nine player cars and three motorcycles plus a police car, all with sprites", () => {
+    expect(PLAYER_CARS).toHaveLength(12);
+    expect(PLAYER_CARS.filter((c) => c.bike)).toHaveLength(3);
     expect(POLICE_SPEC.police).toBe(true);
     expect(ALL_CAR_FILES).toContain(POLICE_SPEC.file);
-    expect(new Set(PLAYER_CARS.map((c) => c.id)).size).toBe(9);
+    expect(new Set(PLAYER_CARS.map((c) => c.id)).size).toBe(12);
   });
 
   it("Silver GT does 0-100 km/h in about 4.4 s", () => {
@@ -229,11 +231,19 @@ describe("Matter.js car physics (headless)", () => {
 
 describe("busy roads (plan 4)", () => {
   it("civilian cars are slower, softer variants of the nine bodies", () => {
-    expect(TRAFFIC_CARS).toHaveLength(PLAYER_CARS.length);
+    const cars = PLAYER_CARS.filter((c) => !c.bike);
+    expect(TRAFFIC_CARS).toHaveLength(cars.length);
     TRAFFIC_CARS.forEach((t, i) => {
-      expect(t.file).toBe(PLAYER_CARS[i].file);
-      expect(t.top).toBeLessThan(PLAYER_CARS[i].top);
-      expect(t.accel).toBeLessThan(PLAYER_CARS[i].accel);
+      expect(t.file).toBe(cars[i].file);
+      expect(t.top).toBeLessThan(cars[i].top);
+      expect(t.accel).toBeLessThan(cars[i].accel);
+    });
+    // and the same for the motorcycles in traffic
+    const bikes = PLAYER_CARS.filter((c) => c.bike);
+    expect(TRAFFIC_BIKES).toHaveLength(bikes.length);
+    TRAFFIC_BIKES.forEach((t, i) => {
+      expect(t.bike).toBe(true);
+      expect(t.top).toBeLessThan(bikes[i].top);
     });
   });
 
@@ -1847,8 +1857,11 @@ describe("right of way and roundabouts", () => {
       const to = nb[(rnd() * nb.length) | 0];
       const p = city.lanePoint(n, to, 0.2 + rnd() * 0.5);
       if (cars.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 14)) continue;
+      // one vehicle in ten is a motorcycle, as on the real road
       const car = new Car(
-        TRAFFIC_CARS[cars.length % TRAFFIC_CARS.length],
+        cars.length % 10 === 4
+          ? TRAFFIC_BIKES[((cars.length / 10) | 0) % TRAFFIC_BIKES.length]
+          : TRAFFIC_CARS[cars.length % TRAFFIC_CARS.length],
         "civil",
       );
       Phys.addCar(car);
@@ -2143,5 +2156,78 @@ describe("cash, garage, combos and daily challenges", () => {
       }
       expect(stats.filter(([k]) => k === "near")).toHaveLength(0);
     });
+  });
+});
+
+describe("motorcycles", () => {
+  const bikes = PLAYER_CARS.filter((c) => c.bike);
+
+  beforeEach(() => {
+    Phys.init({ buildings: [], walls: [] });
+  });
+
+  /** drive a vehicle for `secs` with fixed controls on one surface, from `v0` m/s */
+  function drive(spec: (typeof PLAYER_CARS)[number], surf: (typeof SURF)[keyof typeof SURF], secs: number, v0: number, steer: number, throttle: number): Car {
+    Phys.reset();
+    const car = new Car(spec, "player");
+    Phys.addCar(car);
+    car.place(0, 0, 0);
+    car.setSpeed(v0);
+    car.ctrl.throttle = throttle;
+    car.ctrl.steer = steer;
+    for (let i = 0; i < secs / DT; i++) {
+      car.applyControls(DT, surf);
+      Phys.step(DT);
+      car.readBack();
+    }
+    return car;
+  }
+
+  it("there are three bikes, narrower and lighter than any car, each with a top and a side picture", () => {
+    expect(bikes.map((b) => b.id).sort()).toEqual(["cruiser", "dirt", "race"]);
+    for (const b of bikes) {
+      expect(b.side).toBeTruthy();
+      expect(ALL_CAR_FILES).toContain(b.file);
+      expect(ALL_CAR_FILES).toContain(b.side);
+      expect(b.hitW).toBeLessThan(1);
+      expect(b.mass).toBeLessThan(500);
+      expect(b.durability).toBeLessThan(1);
+      expect(carPrice(b.id)).toBeGreaterThan(0);
+    }
+    expect(Math.max(...bikes.map((b) => b.top))).toBeGreaterThan(Math.max(...PLAYER_CARS.filter((c) => !c.bike).map((c) => c.top)));
+  });
+
+  it("a bike leans into a turn: right turn to the right, left turn to the left, within the limit", () => {
+    const right = drive(bikes.find((b) => b.id === "race")!, SURF.asphalt, 1.5, 28, 1, 0.4);
+    expect(right.lean).toBeGreaterThan(0.2);
+    expect(right.lean).toBeLessThanOrEqual(0.75);
+    const left = drive(bikes.find((b) => b.id === "race")!, SURF.asphalt, 1.5, 28, -1, 0.4);
+    expect(left.lean).toBeLessThan(-0.2);
+    expect(left.lean).toBeGreaterThanOrEqual(-0.75);
+    const straight = drive(bikes.find((b) => b.id === "race")!, SURF.asphalt, 1.5, 28, 0, 0.4);
+    expect(Math.abs(straight.lean)).toBeLessThan(0.03);
+  });
+
+  it("cars never lean, and a bike in the air straightens up", () => {
+    expect(drive(PLAYER_CARS[0], SURF.asphalt, 1.5, 28, 1, 0.4).lean).toBe(0);
+    const bike = drive(bikes[0], SURF.asphalt, 1, 28, 1, 0.4);
+    expect(bike.lean).toBeGreaterThan(0.1);
+    bike.launch(1);
+    for (let i = 0; i < 0.6 / DT; i++) {
+      bike.applyControls(DT, SURF.asphalt);
+      Phys.step(DT);
+      bike.readBack();
+    }
+    expect(Math.abs(bike.lean)).toBeLessThan(0.1);
+  });
+
+  it("the dirt bike gets going on grass better than the road bike", () => {
+    const dirt = drive(bikes.find((b) => b.id === "dirt")!, SURF.grass, 4, 3, 0, 1);
+    const race = drive(bikes.find((b) => b.id === "race")!, SURF.grass, 4, 3, 0, 1);
+    expect(dirt.speed).toBeGreaterThan(race.speed * 1.05);
+    // and on asphalt the road bike is the faster one
+    const dirtRoad = drive(bikes.find((b) => b.id === "dirt")!, SURF.asphalt, 6, 3, 0, 1);
+    const raceRoad = drive(bikes.find((b) => b.id === "race")!, SURF.asphalt, 6, 3, 0, 1);
+    expect(raceRoad.speed).toBeGreaterThan(dirtRoad.speed);
   });
 });

@@ -630,6 +630,50 @@ function drawCarBody(
   ctx.restore();
 }
 
+/**
+ * A motorcycle: the top-down picture, plus the side picture showing through as it leans. From above you see the bike's flank
+ * (wheels on the road line, the rider's side swinging out to the lean side) and the top of the bike shifted into the turn.
+ */
+function drawBikeBody(
+  ctx: CanvasRenderingContext2D,
+  car: Car,
+  x: number,
+  y: number,
+  th: number,
+): void {
+  const s = car.spec,
+    top = images[s.file],
+    side = s.side ? images[s.side] : undefined;
+  const lean = car.lean,
+    sn = Math.sin(Math.abs(lean)),
+    dir = lean < 0 ? -1 : 1;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(th); // x forward, y to the rider's right
+  const grow = 1 + lift(car) * 0.32;
+  ctx.scale(grow, grow);
+  const dw = s.len;
+  if (side && Math.abs(lean) > 0.04) {
+    const dh = (dw * side.height) / side.width;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, Math.abs(lean) / 0.25);
+    // the pictures face left: mirror to face forward, and lay "up" along the lean side
+    ctx.scale(-1, -dir * sn);
+    ctx.drawImage(side, -dw / 2, -dh, dw, dh);
+    ctx.restore();
+  }
+  if (top) {
+    const dh = (dw * top.height) / top.width;
+    ctx.translate(0, dir * 0.5 * (s.rideH ?? 1.3) * sn);
+    ctx.scale(-1, Math.cos(lean));
+    ctx.drawImage(top, -dw / 2, -dh / 2, dw, dh);
+  } else {
+    ctx.fillStyle = "#c33";
+    ctx.fillRect(-dw / 2, -s.hitW / 2, dw, s.hitW);
+  }
+  ctx.restore();
+}
+
 function drawCarLights(
   ctx: CanvasRenderingContext2D,
   car: Car,
@@ -648,7 +692,11 @@ function drawCarLights(
     return lightTmp;
   };
   ctx.globalCompositeOperation = "lighter";
-  if (car.braking && car.vx > 0.5) {
+  if (car.braking && car.vx > 0.5 && s.bike) {
+    const p = at(-s.len * 0.5 + 0.1, 0);
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(g.red, p.x - 0.6, p.y - 0.6, 1.2, 1.2);
+  } else if (car.braking && car.vx > 0.5) {
     for (let k = -1; k <= 1; k += 2) {
       const p = at(-s.len * 0.5 + 0.25, k * 0.68);
       ctx.globalAlpha = 0.85;
@@ -1026,7 +1074,9 @@ export const Renderer = {
     }
     for (let i = 0; i < cars.length; i++) {
       const t = interp[i];
-      if (t) drawCarBody(ctx, cars[i], t.x, t.y, t.th);
+      if (!t) continue;
+      if (cars[i].spec.bike) drawBikeBody(ctx, cars[i], t.x, t.y, t.th);
+      else drawCarBody(ctx, cars[i], t.x, t.y, t.th);
     }
     FX.drawParticles(ctx, vis, false);
     if (quality.spec.glow)

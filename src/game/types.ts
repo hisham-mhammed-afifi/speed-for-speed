@@ -49,6 +49,14 @@ export interface CarSpec {
   redline: number
   police?: boolean
   heavy?: boolean
+  /** a motorcycle: narrow, light, leans into turns, and a hard crash throws the rider */
+  bike?: boolean
+  /** side-view sprite (the flank you see when the bike leans, and the garage picture) */
+  side?: string
+  /** height of bike plus rider in metres: how far the lean swings the top of it sideways */
+  rideH?: number
+  /** off-road ability: more grip and less slowdown on grass and gravel */
+  offroad?: number
 }
 
 export type CarKind = 'player' | 'police' | 'civil'

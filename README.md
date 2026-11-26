@@ -58,6 +58,7 @@ src/
     ai/                      pathfind (A*), drive, police units, heat (pursuit, roadblocks, spikes, helicopter)
     render/                  camera, effects (particles, skid marks), renderer (world), hudCanvas (speedo, minimap)
 public/cars/                 car sprites
+public/bikes/                motorcycle sprites (top view and side view each)
 ```
 
 The world is endless. It is an infinite grid of tiles (16 x 16 blocks, about 1.8 km), each generated on demand from `hash(seed, tx, ty)` so the
@@ -144,6 +145,19 @@ Everything is saved in the browser (`localStorage`, key `heatline.v1`, save form
 - **Daily challenges** (`progress/daily.ts`): three challenges per local date, picked by a seeded hash so everybody gets the same ones that
   day. Each pays once when done; finishing all three keeps a streak (up to +50% rewards).
 - Tests cover the migration, buying rules, upgrade maths, daily picks and streak, and the combo and near-miss logic.
+
+## Motorcycles
+Three bikes sit in the garage after the cars (`data/cars.ts`, `bike: true`): the Orange Scrambler (dirt bike, best off-road), the Maroon Cruiser and
+the Red Fireblade (fastest thing in the game, and fragile). They are narrow and light, turn tighter than any car, and about one vehicle in ten
+in traffic is one too (`TRAFFIC_BIKES`).
+
+- **Leaning** (`physics/car.ts`, `render/renderer.ts` `drawBikeBody`): the lean angle follows `atan(speed * yaw rate / g)`, up to about 43 degrees, smoothed
+  over 0.12 s, and straightens in the air. It is only a drawing effect: the top picture shifts into the turn and narrows, and the side picture
+  shows through as the bike's flank (wheels on the road line, the rider's side swinging out to the lean side). The shadow stays on the road.
+- **Crashes**: a hard hit (a change of speed of 16 m/s, about 58 km/h) throws the rider and ends the run as Wrecked; a civilian bike hit that hard stops dead
+  and is cleared away. Smaller bumps just hurt (bikes have low durability).
+- **Art**: `node scripts/build-assets.mjs "<folder with motorcycle-*.jpg>" --only bikes` cuts the white background out, turns every picture to face left
+  and writes 512 px WebP files to `public/bikes/` (top view `race.webp`, side view `race-side.webp`, and the same for `cruiser` and `dirt`).
 
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.

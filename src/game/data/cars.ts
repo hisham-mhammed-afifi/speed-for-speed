@@ -43,20 +43,36 @@ export const PLAYER_CARS: CarSpec[] = [
     mass: 1580, top: kmh(266), accel: 7.2, grip: 11.8, turnRadius0: 5.2, steerResp: 10.5, durability: 0.9,
   }),
   mk({ id: 'graphite', name: 'Graphite GT', cls: 'Grand Tourer', file: 'cars/LS20261123150955.png', mass: 1800, top: kmh(238), accel: 6.4, grip: 11, durability: 1.1 }),
+  // motorcycles: narrow and light, they lean into turns (see render/renderer.ts drawBikeBody) and a hard crash throws the rider
+  mk({
+    id: 'dirt', name: 'Orange Scrambler', cls: 'Dirt Bike', file: 'bikes/dirt.webp', side: 'bikes/dirt-side.webp', bike: true, len: 2.15, hitW: 0.85, rideH: 1.3,
+    mass: 330, top: kmh(165), accel: 7.6, brakeDecel: 10, grip: 11, turnRadius0: 3.2, steerResp: 13, durability: 0.6, nitroPower: 1.35, redline: 9000, offroad: 1.6,
+  }),
+  mk({
+    id: 'cruiser', name: 'Maroon Cruiser', cls: 'Cruiser', file: 'bikes/cruiser.webp', side: 'bikes/cruiser-side.webp', bike: true, len: 2.3, hitW: 0.9, rideH: 1.3,
+    mass: 360, top: kmh(190), accel: 6.4, brakeDecel: 9, grip: 10.5, turnRadius0: 4.4, steerResp: 9, durability: 0.7, nitroPower: 1.3, redline: 6000,
+  }),
+  mk({
+    id: 'race', name: 'Red Fireblade', cls: 'Sport Bike', file: 'bikes/race.webp', side: 'bikes/race-side.webp', bike: true, len: 2.1, hitW: 0.8, rideH: 1.3,
+    mass: 310, top: kmh(299), accel: 9, brakeDecel: 11, grip: 12.5, turnRadius0: 3.6, steerResp: 13, durability: 0.5, nitroPower: 1.35, redline: 12000,
+  }),
 ]
 
 /**
  * Civilian traffic: the same nine bodies, but tuned like everyday cars (slower, softer, less grip) so they read as
  * traffic rather than rival racers. Their speed is set by the lane driver, so this mostly affects crashes and recovery.
  */
-export const TRAFFIC_CARS: CarSpec[] = PLAYER_CARS.map((c) => ({
+const everyday = (c: CarSpec): CarSpec => ({
   ...c,
   id: c.id + '_traffic',
   top: c.top * 0.5,
   accel: c.accel * 0.55,
   grip: c.grip * 0.88,
   durability: c.durability * 0.8,
-}))
+})
+export const TRAFFIC_CARS: CarSpec[] = PLAYER_CARS.filter((c) => !c.bike).map(everyday)
+/** the motorcycles on the road (about one vehicle in ten) */
+export const TRAFFIC_BIKES: CarSpec[] = PLAYER_CARS.filter((c) => c.bike).map(everyday)
 
 export const POLICE_SPEC: CarSpec = mk({
   id: 'police', name: 'Interceptor', cls: 'Police', file: 'cars/1795439954041.png', mass: 1750, top: kmh(256), accel: 6.9, grip: 11.6, durability: 1.15, police: true,
@@ -66,7 +82,9 @@ export const POLICE_HEAVY: CarSpec = mk({
   durability: 1.6, police: true, heavy: true,
 })
 
-export const ALL_CAR_FILES: string[] = Array.from(new Set(PLAYER_CARS.map((c) => c.file).concat([POLICE_SPEC.file])))
+export const ALL_CAR_FILES: string[] = Array.from(
+  new Set(PLAYER_CARS.flatMap((c) => (c.side ? [c.file, c.side] : [c.file])).concat([POLICE_SPEC.file])),
+)
 
 /** Stats for the car-select screen: integrate the same drive formula the car uses. */
 export function estimate(s: CarSpec): { top: number; t100: number } {

@@ -4,17 +4,24 @@
 //  - trees:  background cut out (flood fill from the edges), trimmed, squared, 192 px WebP with alpha
 //  - grass:  centre crop made seamless (so it tiles), slightly desaturated, 512 px WebP
 //  - lots:   top-down building plots, background cut out, compass icon dropped, 1024 px WebP with alpha
+//  - bikes:  motorcycle-*.jpg (top and side views), background cut out, turned so every bike faces left, 512 px WebP -> public/bikes/
+//
+// `--only bikes` builds just the motorcycles (the tree, grass and lot sources are not needed then):
+//   node scripts/build-assets.mjs "<folder>" --only bikes
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
 
 const src = process.argv[2]
+const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : ''
 if (!src || !fs.existsSync(src)) {
   console.error('usage: node scripts/build-assets.mjs "<source folder>"')
   process.exit(1)
 }
 const out = path.resolve('public/world')
-for (const d of ['trees', 'grass', 'lots']) fs.mkdirSync(path.join(out, d), { recursive: true })
+const bikesOut = path.resolve('public/bikes')
+if (only !== 'bikes') for (const d of ['trees', 'grass', 'lots']) fs.mkdirSync(path.join(out, d), { recursive: true })
+fs.mkdirSync(bikesOut, { recursive: true })
 
 const file = (id) => path.join(src, `Gemini_Generated_Image_${id}.jpg`)
 
@@ -214,9 +221,29 @@ const save = async (img, rel, opts) => {
   report.push([rel, Math.round(fs.statSync(p).size / 1024) + ' KB'])
 }
 
-for (const [id, name] of TREES) await save(await cutout(file(id), { square: true, keepLargest: true, size: 192, holes: true }), `trees/${name}.webp`, { quality: 82, alphaQuality: 92 })
-for (const [id, name] of GRASS) await save(await seamlessTile(file(id), { left: 320, top: 0, width: 768, height: 768 }, 256), `grass/${name}.webp`, { quality: 80 })
-for (const [id, name] of LOTS) await save(await cutout(file(id), { square: false, keepLargest: true, size: 1024 }), `lots/${name}.webp`, { quality: 82, alphaQuality: 90 })
+if (only !== 'bikes') {
+  for (const [id, name] of TREES) await save(await cutout(file(id), { square: true, keepLargest: true, size: 192, holes: true }), `trees/${name}.webp`, { quality: 82, alphaQuality: 92 })
+  for (const [id, name] of GRASS) await save(await seamlessTile(file(id), { left: 320, top: 0, width: 768, height: 768 }, 256), `grass/${name}.webp`, { quality: 80 })
+  for (const [id, name] of LOTS) await save(await cutout(file(id), { square: false, keepLargest: true, size: 1024 }), `lots/${name}.webp`, { quality: 82, alphaQuality: 90 })
+}
+
+// motorcycles: [source name, output id, does the side view face right (so it must be mirrored)?]
+const BIKES = [
+  ['motorcycle-race', 'race', false],
+  ['motorcycle-harley', 'cruiser', true],
+  ['motorcycle-mountain', 'dirt', true],
+]
+if (!only || only === 'bikes') {
+  for (const [name, id, sideFacesRight] of BIKES) {
+    // top view: the photo has the front pointing up; the game's sprites face left, so turn it a quarter turn counter-clockwise
+    const top = await (await cutout(path.join(src, name + '.jpg'), { square: false, keepLargest: true, size: 512 })).png().toBuffer()
+    await save(sharp(top).rotate(-90), `../bikes/${id}.webp`, { quality: 84, alphaQuality: 92 })
+    // side view: make every bike face left
+    let side = await cutout(path.join(src, name + '-side.jpg'), { square: false, keepLargest: true, size: 512 })
+    if (sideFacesRight) side = sharp(await side.png().toBuffer()).flop()
+    await save(side, `../bikes/${id}-side.webp`, { quality: 84, alphaQuality: 92 })
+  }
+}
 
 console.table(report)
 const total = report.reduce((a, r) => a + parseInt(r[1]), 0)

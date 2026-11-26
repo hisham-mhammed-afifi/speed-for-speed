@@ -139,7 +139,7 @@ export const Phys = {
   addCar(car: Car): void {
     const s = car.spec
     const body = Bodies.rectangle(car.x * S, car.y * S, s.len * S * 0.97, s.hitW * S, {
-      chamfer: { radius: 0.5 * S },
+      chamfer: { radius: Math.min(0.5, s.hitW * 0.3) * S },
       frictionAir: 0,
       friction: 0.3,
       frictionStatic: 0.5,

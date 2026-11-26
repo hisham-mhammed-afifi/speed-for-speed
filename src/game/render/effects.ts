@@ -257,8 +257,8 @@ export const FX = {
     const sk = car.skid
     const marks = quality.spec.skidsAll || car.kind === 'player' // on the low tier only the player leaves skid marks
     if (sk > 0.12) {
-      for (let w = 0; w < 2; w++) {
-        const ly = (w ? 1 : -1) * 0.82
+      for (let w = 0; w < (s.bike ? 1 : 2); w++) {
+        const ly = s.bike ? 0 : (w ? 1 : -1) * 0.82 // a motorcycle has one rear wheel
         car.toWorld(-s.len * 0.3, ly, tmp)
         const px = car.wp[w * 2],
           py = car.wp[w * 2 + 1]
@@ -272,7 +272,7 @@ export const FX = {
     }
     if (car.nitroOn) {
       for (let w = -1; w <= 1; w += 2) {
-        car.toWorld(-s.len * 0.5 - 0.1, w * 0.45, tmp)
+        car.toWorld(-s.len * 0.5 - 0.1, w * (s.bike ? 0.1 : 0.45), tmp)
         FX.flame(tmp.x, tmp.y, car.wvx * 0.6 - Math.cos(car.theta) * 8, car.wvy * 0.6 - Math.sin(car.theta) * 8)
       }
     }

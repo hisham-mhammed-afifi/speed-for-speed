@@ -1,6 +1,6 @@
 import { clamp, hyp, pick } from '../core/math'
 import { avoid, capForTraffic, speedTo, steerTo } from '../ai/drive'
-import { TRAFFIC_CARS } from '../data/cars'
+import { TRAFFIC_BIKES, TRAFFIC_CARS } from '../data/cars'
 import { game } from '../state'
 import { carGrid } from './carGrid'
 import type { Car } from '../physics/car'
@@ -574,7 +574,7 @@ export const Traffic = {
       const t = 0.25 + Math.random() * 0.4
       const p = city.lanePoint(n, to, t)
       if (!game.spotFree(p.x, p.y, 12)) continue
-      const spec = pick(TRAFFIC_CARS)
+      const spec = Math.random() < 0.1 ? pick(TRAFFIC_BIKES) : pick(TRAFFIC_CARS)
       const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'civil')
       car.setSpeed(8)
       const drv = new LaneDriver(city, n, to)

@@ -66,7 +66,7 @@ export function CarSelect() {
             &#8249;
           </button>
           <div className={owned ? 'preview' : 'preview locked'}>
-            <img src={import.meta.env.BASE_URL + base.file} alt={base.name} />
+            <img src={import.meta.env.BASE_URL + (base.side ?? base.file)} alt={base.name} />
             {!owned && <div className="lock-tag">{money(price)}</div>}
           </div>
           <button className="arrow" onClick={() => step(1)} aria-label="Next car">
@@ -77,7 +77,7 @@ export function CarSelect() {
           <h3>{base.name}</h3>
           <div className="sub">
             {base.cls}
-            {base.awd ? ' - AWD' : ' - RWD'}
+            {base.bike ? ' - Motorcycle' : base.awd ? ' - AWD' : ' - RWD'}
           </div>
           <div>
             <StatBar label="Top speed" frac={bars.speed} text={`${bars.topKmh} km/h`} />

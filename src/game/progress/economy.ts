@@ -14,6 +14,9 @@ const PRICES: Record<string, number> = {
   graphite: 24000,
   orange: 32000,
   white: 42000,
+  dirt: 6000,
+  cruiser: 11000,
+  race: 30000,
 }
 
 export const carPrice = (id: string): number => PRICES[id] ?? 20000

@@ -36,6 +36,9 @@ import type { CameraMode } from './render/camera'
 
 const store = () => useGameStore.getState()
 
+/** change of speed (m/s, about 58 km/h) in one crash that throws a motorcycle rider off */
+const BIKE_THROW_DV = 16
+
 /**
  * Owns the canvas, the fixed-step loop and the game flow (start, pause, results).
  * React never touches the simulation directly: components call the methods below and read the zustand store.
@@ -203,6 +206,15 @@ class GameEngine {
       }
       hurt(a, dvA)
       hurt(b, dvB)
+      // a hard crash throws a motorcycle's rider; other road users' bikes just stop dead
+      const down = (car: Car | null, dv: number) => {
+        if (!car || !car.spec.bike || car.kind !== 'civil' || dv < BIKE_THROW_DV) return
+        car.health = 0
+        const u = game.civs.find((c) => c.car === car)
+        if (u) u.driver.speedCap = 0
+      }
+      down(a, dvA)
+      down(b, dvB)
       const pl = game.player.car
       if (a === pl || b === pl) {
         const dv = a === pl ? dvA : dvB
@@ -210,6 +222,12 @@ class GameEngine {
         const other = a === pl ? b : a
         if (dv > 0.5) Combo.markHit(other)
         if (dv > 3) Combo.lose()
+        if (pl.spec.bike && dv >= BIKE_THROW_DV) {
+          camera.addShake(1)
+          game.toast('THROWN OFF THE BIKE', '#ff4d4d')
+          game.endRun('wrecked')
+          return
+        }
         if (!other) return
         if (other.kind === 'police' && !heat.active && dv > 1) heat.start('COLLISION')
         else if (other.kind === 'civil' && dv > 3) {
