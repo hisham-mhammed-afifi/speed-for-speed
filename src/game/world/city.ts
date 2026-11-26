@@ -1,12 +1,13 @@
 import type { Block, BlockDistrict, BlockRoad, SuperBlock, Building, District, Jump, PropSpot, Rect, StaticRec, Surface, Tree, Tunnel, Wall } from '../types'
 import type { LineSet } from './layout'
 
-export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel', Surface> = {
+export const SURF: Record<'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel' | 'sand', Surface> = {
   asphalt: { kind: 'asphalt', grip: 1.0, roll: 1.0 },
   sidewalk: { kind: 'sidewalk', grip: 0.9, roll: 1.6 },
   lot: { kind: 'lot', grip: 0.85, roll: 1.5 },
   grass: { kind: 'grass', grip: 0.58, roll: 4.2 },
   gravel: { kind: 'gravel', grip: 0.78, roll: 2.6 },
+  sand: { kind: 'sand', grip: 0.72, roll: 3.2 },
 }
 
 export type RoadType = 'highway' | 'avenue' | 'street' | 'alley'

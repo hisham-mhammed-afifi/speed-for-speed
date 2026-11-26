@@ -60,6 +60,7 @@ src/
 public/cars/                 car sprites
 public/bikes/                motorcycle sprites (top view and side view each)
 public/trucks/               the three lorries of the traffic (top view)
+public/world/textures/       sea, sand and rock ground textures; public/world/statues/ (optional) the statue pictures
 ```
 
 The world is endless. It is an infinite grid of tiles (16 x 16 blocks, about 1.8 km), each generated on demand from `hash(seed, tx, ty)` so the
@@ -174,6 +175,20 @@ Long vehicles need room, so the spacing in traffic is length-aware:
   can follow the junction curves.
 - The 110-vehicle simulation test (cars, motorcycles and lorries packed into town for 90 s) has no collisions across 40 random seeds.
 - Art: `node scripts/build-assets.mjs "<folder>" --only trucks`. The white lorry photos sit on a white backdrop, so their background cut-off is stricter.
+
+## Sea, sand, rock and statue squares
+Three photo textures (`public/world/textures/`: sea, sand, rock) are made seamless by `node scripts/build-assets.mjs "<folder>" --only textures`.
+- **The river** is the sea: sandy banks (4 m on each side) with the water pattern drifting slowly (one pattern-matrix update per frame, `animateWater`).
+- **Sandy lots**: 2 to 4 unbuilt blocks per town in the suburbs and the port are sand (`type: 'sand'`, `SURF.sand`: less grip, 0.78x top speed; the dirt
+  bike barely notices it).
+- **Rocky hills**: about 4 in 10 roomy plain parks get one or two outcrops (`BuildingKind` `'rock'`), drawn as stacked, shrinking layers of the rock texture
+  that lean with the camera like a roof. They are real obstacles (collider, line of sight) and no tree grows out of one.
+- **Statue squares**: every town has exactly three (`type: 'square'`; the home town's are the three nearest the start). A square is a paved block with
+  rings and paths, four corner trees, and a stone fountain basin (moving water) around a pedestal and a statue (`'statue'` building, a 12 m collider).
+  Until the artist's pictures exist the statue is a drawn bronze figure, obelisk or globe. To use pictures: drop `statue-1.jpg` .. `statue-3.jpg`
+  (top view, white background) in the art folder, run `--only statues`, and list the three `world/statues/sN.webp` files in `STATUE_FILES`
+  (`world/worldArt.ts`).
+- All of this is generated on its own random stream (`seed ^ 0x5a1e5`), so the rest of a town doesn't depend on it.
 
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.

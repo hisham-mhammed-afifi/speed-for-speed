@@ -8,7 +8,10 @@
 //
 //  - trucks: white-truck / silver-truck / container-truck .jpg (top views), cut out, turned to face left, 768 px WebP -> public/trucks/
 //
-// `--only bikes` or `--only trucks` builds just those (the tree, grass and lot sources are not needed then):
+//  - textures: sea-water / desert-sand / mountains .jpg, made seamless, 512 px WebP -> public/world/textures/ (sea, sand, rock)
+//  - statues:  statue-1..3.jpg (top views, optional), background cut out, 384 px WebP -> public/world/statues/ (s1..s3)
+//
+// `--only bikes`, `--only trucks`, `--only textures` or `--only statues` builds just those (the tree, grass and lot sources are not needed then):
 //   node scripts/build-assets.mjs "<folder>" --only trucks
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,6 +27,7 @@ const out = path.resolve('public/world')
 const bikesOut = path.resolve('public/bikes')
 if (!only) for (const d of ['trees', 'grass', 'lots']) fs.mkdirSync(path.join(out, d), { recursive: true })
 fs.mkdirSync(bikesOut, { recursive: true })
+for (const d of ['textures', 'statues']) fs.mkdirSync(path.join(out, d), { recursive: true })
 const trucksOut = path.resolve('public/trucks')
 fs.mkdirSync(trucksOut, { recursive: true })
 
@@ -197,7 +201,7 @@ async function cutout(f, { square, keepLargest, size, holes, bgMin }) {
 }
 
 /** Make a square image tile seamlessly: blend it with a half-rolled copy through a soft window. */
-async function seamlessTile(f, crop, size) {
+async function seamlessTile(f, crop, size, tone = { saturation: 0.82, brightness: 0.82 }) {
   const base = await sharp(f).extract(crop).resize(768, 768).removeAlpha().raw().toBuffer()
   const N = 768
   const out = Buffer.alloc(N * N * 3)
@@ -214,7 +218,7 @@ async function seamlessTile(f, crop, size) {
     }
   }
   return sharp(out, { raw: { width: N, height: N, channels: 3 } })
-    .modulate({ saturation: 0.82, brightness: 0.82 })
+    .modulate(tone)
     .resize(size, size)
 }
 
@@ -260,6 +264,30 @@ if (!only || only === 'trucks') {
   for (const [name, id, bgMin] of TRUCKS) {
     const top = await (await cutout(path.join(src, name + '.jpg'), { square: false, keepLargest: true, size: 768, bgMin })).png().toBuffer()
     await save(sharp(top).rotate(-90), `../trucks/${id}.webp`, { quality: 84, alphaQuality: 92 })
+  }
+}
+
+// ground textures (sea, sand, rock): the photos are nearly seamless already; blending them with a half-rolled copy removes the last visible seam
+const TEXTURES = [
+  ['sea-water', 'sea'],
+  ['desert-sand', 'sand'],
+  ['mountains', 'rock'],
+]
+if (!only || only === 'textures') {
+  for (const [name, id] of TEXTURES) {
+    await save(await seamlessTile(path.join(src, name + '.jpg'), { left: 0, top: 0, width: 1024, height: 1024 }, 512, { saturation: 1, brightness: 1 }), `textures/${id}.webp`, { quality: 82 })
+  }
+}
+
+// statue pictures (top views on a white background), added by the artist when they exist: statue-1.jpg .. statue-3.jpg
+if (!only || only === 'statues') {
+  for (let k = 1; k <= 3; k++) {
+    const f = path.join(src, `statue-${k}.jpg`)
+    if (!fs.existsSync(f)) {
+      console.log('no statue-' + k + '.jpg yet: skipped')
+      continue
+    }
+    await save(await cutout(f, { square: true, keepLargest: true, size: 384, bgMin: 240 }), `statues/s${k}.webp`, { quality: 84, alphaQuality: 92 })
   }
 }
 

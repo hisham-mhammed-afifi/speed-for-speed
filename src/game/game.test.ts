@@ -345,6 +345,8 @@ describe("city districts (plan 5)", () => {
     expect([...kinds].sort()).toEqual([
       "container",
       "house",
+      "rock",
+      "statue",
       "tower",
       "warehouse",
     ]);
@@ -2339,5 +2341,99 @@ describe("lorries in traffic", () => {
     expect(holdAfter(TRAFFIC_CARS[0], hwn + 5.5)).toBe(false);
     expect(holdAfter(lorry, hwn + 5.5)).toBe(true);
     expect(holdAfter(lorry, hwn + 10)).toBe(false);
+  });
+});
+
+describe("squares, sand and rocks", () => {
+  const windows: [number, number][] = [[0, 0], [3, 2], [-4, 5], [7, -6], [-9, -3]];
+  const tilesOf = () => {
+    World.init();
+    const out: Tile[] = [];
+    for (const [cx, cy] of windows) for (const t of World.build(cx, cy, 1).tiles) if (!out.includes(t)) out.push(t);
+    return out;
+  };
+
+  it("every town has exactly three statue squares, each with one statue in the middle and nothing else built on it", () => {
+    const tiles = tilesOf();
+    expect(tiles.length).toBeGreaterThan(30);
+    for (const t of tiles) {
+      const squares = t.blocks.filter((b) => b.type === "square");
+      expect(squares).toHaveLength(3);
+      expect(new Set(squares.map((b) => b.square!.k))).toEqual(new Set([0, 1, 2]));
+      for (const b of squares) {
+        expect(b.lots).toBeUndefined();
+        const inside = t.buildings.filter((q) => q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1);
+        expect(inside).toHaveLength(1);
+        expect(inside[0].kind).toBe("statue");
+        expect(inside[0].art).toBe(b.square!.k);
+        expect(Math.hypot(inside[0].x - b.square!.cx, inside[0].y - b.square!.cy)).toBeLessThan(0.01);
+      }
+    }
+  });
+
+  it("the home town's three squares are close to where you start", () => {
+    World.init();
+    const city = World.build(0, 0, 1);
+    const n = city.centerNode();
+    const sx = city.nodeX(n),
+      sy = city.nodeY(n);
+    const home = city.tileAt(sx, sy)!;
+    const squares = home.blocks.filter((b) => b.type === "square");
+    expect(squares).toHaveLength(3);
+    for (const b of squares) expect(Math.hypot(b.square!.cx - sx, b.square!.cy - sy)).toBeLessThan(700);
+  });
+
+  it("the decorations are the same every time a tile is made", () => {
+    const sig = () =>
+      tilesOf()
+        .map((t) => t.blocks.filter((b) => b.type === "square" || b.type === "sand").map((b) => `${b.type}${b.i},${b.j}`).join(" ") + "|" + t.buildings.filter((q) => q.kind === "rock" || q.kind === "statue").map((q) => `${q.kind}${q.x.toFixed(1)},${q.y.toFixed(1)},${q.art}`).join(" "))
+        .join("\n");
+    const a = sig();
+    World.cache.clear();
+    expect(sig()).toBe(a);
+  });
+
+  it("rocks stand in plain parks, with no tree growing out of them, and they block cars", () => {
+    const tiles = tilesOf();
+    let rocks = 0;
+    for (const t of tiles) {
+      for (const r of t.buildings.filter((q) => q.kind === "rock")) {
+        rocks++;
+        const park = t.blocks.find((b) => b.type === "park" && !b.sb && r.x > b.x0 && r.x < b.x1 && r.y > b.y0 && r.y < b.y1);
+        expect(park).toBeDefined();
+        expect(r.x0).toBeGreaterThan(park!.x0 + 5);
+        expect(r.x1).toBeLessThan(park!.x1 - 5);
+        for (const tr of t.trees) expect(tr.x > r.x0 - tr.r && tr.x < r.x1 + tr.r && tr.y > r.y0 - tr.r && tr.y < r.y1 + tr.r).toBe(false);
+      }
+    }
+    expect(rocks).toBeGreaterThan(20);
+    World.init();
+    const city = World.build(0, 0, 1);
+    const rock = city.buildings.find((q) => q.kind === "rock")!;
+    expect(city.isObstacle(rock.x, rock.y)).toBe(true);
+    expect(city.isObstacle(rock.x1 + 6, rock.y)).toBe(false);
+  });
+
+  it("a sandy lot is sand underfoot, and sand slows a car down", () => {
+    World.init();
+    const city = World.build(0, 0, 1);
+    const sand = city.tiles.flatMap((t) => t.blocks).find((b) => b.type === "sand")!;
+    expect(sand).toBeDefined();
+    expect(city.surfaceAt((sand.x0 + sand.x1) / 2, (sand.y0 + sand.y1) / 2).kind).toBe("sand");
+    const top = (surf: (typeof SURF)[keyof typeof SURF]): number => {
+      Phys.init({ buildings: [], walls: [] });
+      const car = new Car(PLAYER_CARS[0], "player");
+      Phys.addCar(car);
+      car.place(0, 0, 0);
+      car.ctrl.throttle = 1;
+      for (let i = 0; i < 25 / DT; i++) {
+        car.applyControls(DT, surf);
+        Phys.step(DT);
+        car.readBack();
+      }
+      return car.speed;
+    };
+    expect(top(SURF.sand)).toBeLessThan(top(SURF.asphalt) * 0.85);
+    expect(top(SURF.sand)).toBeGreaterThan(top(SURF.grass));
   });
 });

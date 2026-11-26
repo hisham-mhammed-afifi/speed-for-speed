@@ -14,7 +14,7 @@ export interface Controls {
   nitro: number
 }
 
-export type SurfaceKind = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel'
+export type SurfaceKind = 'asphalt' | 'sidewalk' | 'lot' | 'grass' | 'gravel' | 'sand'
 
 export interface Surface {
   kind: SurfaceKind
@@ -144,7 +144,7 @@ export const DISTRICT_NAMES: Record<District, string> = {
   highway: 'Highway Ring',
 }
 
-export type BuildingKind = 'tower' | 'warehouse' | 'house' | 'container'
+export type BuildingKind = 'tower' | 'warehouse' | 'house' | 'container' | 'rock' | 'statue'
 
 /** Axis-aligned building collider + render data. */
 export interface Building {
@@ -164,6 +164,8 @@ export interface Building {
   props: { ox: number; oy: number; w: number; h: number }[]
   hasHeli: boolean
   stamp: number
+  /** which statue (statues) or the shape seed (rocks) */
+  art?: number
   /** part of a landmark lot: the photo already shows its roof, so only the collider exists (nothing is drawn) */
   flat?: boolean
 }
@@ -195,7 +197,7 @@ export interface Block {
   y0: number
   x1: number
   y1: number
-  type: 'build' | 'park' | 'plaza' | 'water'
+  type: 'build' | 'park' | 'plaza' | 'water' | 'square' | 'sand'
   district: BlockDistrict
   /** photo landmark lots on this block, at real-world size (see world/worldArt.ts) */
   lots?: LotPlacement[]
@@ -203,6 +205,8 @@ export interface Block {
   rest?: Rect[]
   /** this block is one quarter of a bend or roundabout superblock (see SuperBlock) */
   sb?: SuperBlock
+  /** a city square: paved, with a fountain and a statue (k = which statue) at its centre */
+  square?: { cx: number; cy: number; k: number }
 }
 
 /**

@@ -9,10 +9,10 @@ import type { camera as Camera } from "./camera";
 import type { Car } from "../physics/car";
 import { Props } from "../world/props";
 import { quality } from "./quality";
-import { GRASS_FILES, LOTS, TREE_FILES, treeSpecies } from "../world/worldArt";
+import { GRASS_FILES, LOTS, STATUE_FILES, TEXTURE_FILES, TREE_FILES, treeSpecies } from "../world/worldArt";
 import type { City, Tile } from "../world/city";
 import type { Heli, Spike } from "../ai/heat";
-import type { BlockRoad, Building, LotPlacement, Vec2 } from "../types";
+import type { Block, BlockRoad, Building, LotPlacement, Vec2 } from "../types";
 
 function makeTex(
   size: number,
@@ -48,7 +48,9 @@ type PatternName =
   | "lawn"
   | "plaza"
   | "water"
-  | "gravel";
+  | "gravel"
+  | "sand"
+  | "rock";
 const pat = {} as Record<PatternName, CanvasPattern>;
 
 // ---------------------------------------------------------------- ground
@@ -190,11 +192,14 @@ function drawGround(
             ? pat.lawn
             : bl.district === "port"
               ? pat.port
-              : bl.type === "plaza"
+              : bl.type === "plaza" || bl.type === "square"
                 ? pat.plaza
                 : pat.lot;
+      if (bl.type === "sand") ctx.fillStyle = pat.sand;
+      else if (bl.type === "square") ctx.fillStyle = pat.plaza;
       ctx.fillRect(bl.x0 + 3, bl.y0 + 3, bl.x1 - bl.x0 - 6, bl.y1 - bl.y0 - 6);
       if (bl.lots) for (const lot of bl.lots) drawLot(ctx, lot);
+      if (bl.square) drawSquarePaving(ctx, bl);
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
       ctx.lineWidth = 0.3;
       ctx.strokeRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0);
@@ -206,16 +211,16 @@ function drawGround(
   for (const rv of city.rivers) {
     if (rv.x1 < vis.x0 || rv.x0 > vis.x1 || rv.y1 < vis.y0 || rv.y0 > vis.y1)
       continue;
-    ctx.fillStyle = pat.water;
+    // sandy banks, then the sea (its waves drift slowly), with a dark wet line where they meet
+    ctx.fillStyle = pat.sand;
     ctx.fillRect(rv.x0, rv.y0, rv.x1 - rv.x0, rv.y1 - rv.y0);
-    ctx.strokeStyle = "rgba(190,225,250,0.16)";
-    ctx.lineWidth = 0.25;
-    for (let y = Math.max(rv.y0, vis.y0); y < Math.min(rv.y1, vis.y1); y += 9) {
-      ctx.beginPath();
-      ctx.moveTo(rv.x0 + 4, y);
-      ctx.lineTo(rv.x1 - 4, y + 2.5);
-      ctx.stroke();
-    }
+    const wy0 = Math.max(rv.y0, vis.y0 - 2),
+      wy1 = Math.min(rv.y1, vis.y1 + 2);
+    ctx.fillStyle = pat.water;
+    ctx.fillRect(rv.x0 + BANK, wy0, rv.x1 - rv.x0 - 2 * BANK, wy1 - wy0);
+    ctx.fillStyle = "rgba(60,48,28,0.28)";
+    ctx.fillRect(rv.x0 + BANK - 0.7, wy0, 0.7, wy1 - wy0);
+    ctx.fillRect(rv.x1 - BANK, wy0, 0.7, wy1 - wy0);
   }
   for (const br of city.bridges) {
     if (br.y1 < vis.y0 || br.y0 > vis.y1 || br.x1 < vis.x0 || br.x0 > vis.x1)
@@ -730,12 +735,204 @@ function drawCarLights(
 }
 
 // ---------------------------------------------------------------- buildings
+/** metres of sea beach along each side of the river (the sand shows between the road and the water) */
+const BANK = 4;
+const TAU = Math.PI * 2;
+
+/** the sea pattern drifts slowly: one matrix update per frame (the fountains use the same pattern) */
+let waterScale = 1 / 22;
+const waterM = typeof DOMMatrix === "undefined" ? null : new DOMMatrix();
+function animateWater(t: number): void {
+  if (!waterM || !pat.water) return;
+  waterM.a = waterM.d = waterScale;
+  waterM.e = t * 0.7;
+  waterM.f = t * 0.3;
+  try {
+    pat.water.setTransform(waterM);
+  } catch {
+    /* older browsers */
+  }
+}
+
+/** the paving of a city square: stone rings and four paths out from the fountain */
+function drawSquarePaving(ctx: CanvasRenderingContext2D, bl: Block): void {
+  const sq = bl.square!;
+  ctx.save();
+  ctx.strokeStyle = "rgba(60,62,68,0.35)";
+  ctx.lineWidth = 0.35;
+  for (const r of [8.5, 12.5, 16.5]) {
+    ctx.beginPath();
+    ctx.arc(sq.cx, sq.cy, r, 0, TAU);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(230,232,236,0.14)";
+  const reach = Math.min(bl.x1 - bl.x0, bl.y1 - bl.y0) / 2 - 3;
+  ctx.fillRect(sq.cx - 1.6, sq.cy - reach, 3.2, reach * 2);
+  ctx.fillRect(sq.cx - reach, sq.cy - 1.6, reach * 2, 3.2);
+  ctx.restore();
+}
+
+/** a rocky hill: stacked, shrinking, lighter layers of the mountain texture, leaning with the camera like a building roof */
+function drawRock(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
+  const seed = b.art ?? 0;
+  const N = 12;
+  const rad = (i: number) => {
+    const v = Math.sin((seed + i * 7.31) * 12.9898) * 43758.5453;
+    return 0.78 + 0.22 * (v - Math.floor(v)); // 0.78 .. 1 of the collider, so it never spills out of it
+  };
+  const path = (scale: number, ox: number, oy: number) => {
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * TAU,
+        r = rad(i) * scale;
+      const x = b.x + ox + Math.cos(a) * b.hx * r,
+        y = b.y + oy + Math.sin(a) * b.hy * r;
+      if (i) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+  };
+  const k = 0.0012 * b.height * 2.2;
+  const sx = (b.x - cam.x) * k,
+    sy = (b.y - cam.y) * k;
+  const s = b.height * 0.25;
+  path(1, s * 0.6, s * 0.6); // the shadow, thrown away from the light
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fill();
+  for (let layer = 0; layer < 4; layer++) {
+    const f = layer / 3;
+    path(1 - f * 0.3, sx * f, sy * f);
+    ctx.fillStyle = pat.rock;
+    ctx.fill();
+    ctx.fillStyle = layer === 0 ? "rgba(20,18,16,0.38)" : `rgba(255,255,255,${0.04 + f * 0.1})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 0.3;
+    ctx.stroke();
+  }
+}
+
+/** a statue square's centrepiece: a stone basin of moving water, a pedestal, and the statue (the artist's picture, or a bronze placeholder) */
+function drawStatue(ctx: CanvasRenderingContext2D, b: Building, cam: typeof Camera): void {
+  const cx = b.x,
+    cy = b.y,
+    t = game.time;
+  const k = b.art ?? 0;
+  ctx.fillStyle = "#858890";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 6.1, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#4f525a";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5.5, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = pat.water;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5.2, 0, TAU);
+  ctx.fill();
+  for (let q = 0; q < 3; q++) {
+    const ph = (t * 0.3 + q / 3) % 1;
+    ctx.strokeStyle = `rgba(225,242,255,${0.4 * (1 - ph)})`;
+    ctx.lineWidth = 0.22;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 1.9 + ph * 3.2, 0, TAU);
+    ctx.stroke();
+  }
+  // the shadow of pedestal and statue, thrown towards the bottom right like the buildings'
+  ctx.save();
+  ctx.translate(cx + 2.4, cy + 2.6);
+  ctx.rotate(0.75);
+  ctx.fillStyle = "rgba(0,0,0,0.26)";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 3.6, 1.2, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+  // pedestal
+  const lift = (h: number) => ({ x: (cx - cam.x) * 0.0012 * h, y: (cy - cam.y) * 0.0012 * h });
+  const lp = lift(3.4);
+  ctx.fillStyle = "#6a6d75";
+  ctx.fillRect(cx - 1.8, cy - 1.8, 3.6, 3.6);
+  ctx.fillStyle = "#a4a7ae";
+  ctx.fillRect(cx - 1.8 + lp.x, cy - 1.8 + lp.y, 3.6, 3.6);
+  ctx.strokeStyle = "rgba(0,0,0,0.45)";
+  ctx.lineWidth = 0.2;
+  ctx.strokeRect(cx - 1.8 + lp.x, cy - 1.8 + lp.y, 3.6, 3.6);
+  // the statue on top
+  const sp = lift(9);
+  const px = cx + sp.x,
+    py = cy + sp.y;
+  const im = STATUE_FILES[k] ? images[STATUE_FILES[k]] : undefined;
+  if (im) {
+    ctx.drawImage(im, px - 2.7, py - 2.7, 5.4, 5.4);
+    return;
+  }
+  // placeholder: a bronze figure with outstretched arms, an obelisk or a globe, depending on which statue it is
+  ctx.save();
+  ctx.translate(px, py);
+  const shade = (a: number) => `rgba(120,80,30,${a})`;
+  if (k % 3 === 0) {
+    ctx.rotate(0.5);
+    ctx.fillStyle = "#b0813f";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 0.55, 1.5, 0, 0, TAU); // the arms stretched out
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 1.25, 0.6, 0, 0, TAU); // the shoulders
+    ctx.fill();
+    ctx.fillStyle = "#8b6026";
+    ctx.beginPath();
+    ctx.arc(0, 0, 0.45, 0, TAU); // the head
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,230,170,0.5)";
+    ctx.beginPath();
+    ctx.arc(-0.12, -0.12, 0.16, 0, TAU);
+    ctx.fill();
+  } else if (k % 3 === 1) {
+    ctx.rotate(0.78);
+    ctx.fillStyle = "#c9ccd2";
+    ctx.fillRect(-1, -1, 2, 2); // an obelisk seen from above: four faces meeting in a point
+    ctx.fillStyle = "#9da1a9";
+    ctx.beginPath();
+    ctx.moveTo(-1, -1);
+    ctx.lineTo(1, -1);
+    ctx.lineTo(0, 0);
+    ctx.closePath();
+    ctx.moveTo(-1, 1);
+    ctx.lineTo(1, 1);
+    ctx.lineTo(0, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 0.15;
+    ctx.strokeRect(-1, -1, 2, 2);
+  } else {
+    ctx.fillStyle = "#b0813f";
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.4, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = shade(0.7);
+    ctx.lineWidth = 0.18;
+    for (const r of [0.5, 0.95]) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255,230,170,0.45)";
+    ctx.beginPath();
+    ctx.arc(-0.4, -0.4, 0.4, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawBuilding(
   ctx: CanvasRenderingContext2D,
   b: Building,
   cam: typeof Camera,
 ): void {
   if (b.flat) return; // part of a photo lot: already in the picture
+  if (b.kind === "rock") return drawRock(ctx, b, cam);
+  if (b.kind === "statue") return drawStatue(ctx, b, cam);
   const k = 0.0012 * b.height;
   const sx = (b.x - cam.x) * k,
     sy = (b.y - cam.y) * k;
@@ -804,7 +1001,7 @@ function drawShadows(ctx: CanvasRenderingContext2D, list: Building[]): void {
   for (let i = 0; i < list.length; i++) {
     const b = list[i],
       s = b.height * 0.2;
-    if (b.flat) continue;
+    if (b.flat || b.kind === "rock" || b.kind === "statue") continue; // those draw their own shadows
     ctx.fillRect(b.x0 + s * 0.5, b.y0 + s * 0.5, b.x1 - b.x0, b.y1 - b.y0);
     ctx.fillRect(b.x0 + s, b.y0 + s, b.x1 - b.x0, b.y1 - b.y0);
   }
@@ -1010,6 +1207,8 @@ export const Renderer = {
     pat.plaza = mk(makeTex(256, "#8d9096", 30, 900));
     pat.water = mk(makeTex(256, "#2a5b86", 46, 2400));
     pat.gravel = mk(makeTex(256, "#8a7b5c", 70, 3200));
+    pat.sand = mk(makeTex(256, "#cdb27a", 40, 2200));
+    pat.rock = mk(makeTex(256, "#6f6b65", 50, 2600));
     FX.init();
   },
 
@@ -1031,6 +1230,10 @@ export const Renderer = {
     };
     pat.grass = photo(GRASS_FILES.meadow, 4) ?? pat.grass;
     pat.lawn = photo(GRASS_FILES.lawn, 4) ?? pat.lawn;
+    pat.water = photo(TEXTURE_FILES.sea, 40) ?? pat.water;
+    if (images[TEXTURE_FILES.sea]) waterScale = 40 / images[TEXTURE_FILES.sea].width;
+    pat.sand = photo(TEXTURE_FILES.sand, 24) ?? pat.sand;
+    pat.rock = photo(TEXTURE_FILES.rock, 36) ?? pat.rock;
     bakeTreeShadows();
   },
 
@@ -1041,6 +1244,7 @@ export const Renderer = {
   ): void {
     const city = game.city,
       vis = cam.vis;
+    animateWater(game.time);
     drawGround(ctx, city, vis);
     drawMarkings(ctx, city, vis);
     drawGravel(ctx, city, vis);

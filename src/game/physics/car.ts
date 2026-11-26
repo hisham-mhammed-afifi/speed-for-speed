@@ -177,7 +177,7 @@ export class Car {
     // ---- grip budget ----
     const health = this.health / 100
     const flat = this.flat > 0
-    const surfGrip = s.offroad && (surf.kind === 'grass' || surf.kind === 'gravel') ? Math.min(1, surf.grip * s.offroad) : surf.grip
+    const surfGrip = s.offroad && (surf.kind === 'grass' || surf.kind === 'gravel' || surf.kind === 'sand') ? Math.min(1, surf.grip * s.offroad) : surf.grip
     const grip = s.grip * surfGrip * (flat ? 0.65 : 1) * (this.landT > 0 ? 0.5 : 1) * (0.85 + 0.15 * health)
 
     // ---- longitudinal ----
@@ -192,7 +192,7 @@ export class Car {
     let aF = 0,
       wheelspin = 0
     if (drive > 0) {
-      const top = s.top * (nitroWant ? 1.12 : 1) * (surf.kind === 'grass' ? (s.offroad ? 0.9 : 0.6) : 1)
+      const top = s.top * (nitroWant ? 1.12 : 1) * (surf.kind === 'grass' ? (s.offroad ? 0.9 : 0.6) : surf.kind === 'sand' ? (s.offroad ? 0.95 : 0.78) : 1)
       const ratio = clamp(vF / top, 0, 1.2)
       let a = drive * s.accel * Math.max(0, 1 - ratio * ratio)
       a *= (1 - 0.4 * (1 - health)) * this.boost * (nitroWant ? s.nitroPower : 1) * (flat ? 0.7 : 1)

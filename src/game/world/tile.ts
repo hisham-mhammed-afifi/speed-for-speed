@@ -189,6 +189,36 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
     }
   }
 
+  // ---------- decorations: three statue squares, a few sandy lots, rocky hills in the parks ----------
+  // (their own random stream, like the lots and superblocks, so the rest of the town doesn't depend on them)
+  const RD = rng(hash3(seed ^ 0x5a1e5, tx, ty))
+  {
+    const nearRiver = (b: Block) => riverCol >= 0 && Math.abs(b.i - riverCol) <= 1
+    const sized = (b: Block, lo: number, hi: number) => b.x1 - b.x0 >= lo && b.x1 - b.x0 <= hi && b.y1 - b.y0 >= lo && b.y1 - b.y0 <= hi
+    // the squares: roomy blocks, downtown first, well apart (in the home town, the ones nearest the start)
+    const cands = blocks.filter((b) => (b.type === 'build' || b.type === 'plaza') && !b.sb && !nearRiver(b) && sized(b, 55, 150))
+    const dist2 = (b: Block) => ((b.x0 + b.x1) / 2 - vx[8]) ** 2 + ((b.y0 + b.y1) / 2 - hy[8]) ** 2
+    const key = new Map<Block, number>(cands.map((b) => [b, home ? dist2(b) : (b.district === 'downtown' ? 0 : 0.6) + RD()]))
+    cands.sort((p, q) => key.get(p)! - key.get(q)!)
+    const chosen: Block[] = []
+    for (const gap of [4, 3, 2, 1, 0]) {
+      for (const b of cands) {
+        if (chosen.length >= 3) break
+        if (!chosen.includes(b) && chosen.every((c) => Math.max(Math.abs(c.i - b.i), Math.abs(c.j - b.j)) >= gap)) chosen.push(b)
+      }
+    }
+    chosen.forEach((b, k) => {
+      b.type = 'square'
+      b.square = { cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, k }
+    })
+    // sandy lots: unbuilt ground in the suburbs and the port
+    const sandy = blocks.filter((b) => b.type !== 'water' && b.type !== 'square' && !b.sb && !nearRiver(b) && b.district !== 'downtown' && sized(b, 30, 160))
+    const rank = new Map<Block, number>(sandy.map((b) => [b, (b.type === 'plaza' || b.type === 'park' ? 0 : 1) + RD() * 1.4]))
+    sandy.sort((p, q) => rank.get(p)! - rank.get(q)!)
+    const nSand = 2 + ((RD() * 3) | 0)
+    for (const b of sandy.slice(0, nSand)) b.type = 'sand'
+  }
+
   // ---------- landmark lots: photo set pieces at their real-world size ----------
   // (a separate generator, so the rest of the city doesn't depend on how many lots there are)
   // A lot is anchored in one corner of its block; the strips left over get ordinary generated buildings (block.rest).
@@ -405,12 +435,37 @@ export function generateTile(seed: number, tx: number, ty: number, V: LineSet, H
       if (b.district === 'downtown') towerSplit(x0, y0, x1, y1, 0)
       else if (b.district === 'port') genPort(x0, y0, x1, y1)
       else genSuburbs(x0, y0, x1, y1)
+    } else if (b.type === 'square' && b.square) {
+      // the statue in its fountain at the centre, and a tree in each corner
+      const { cx, cy, k } = b.square
+      push('statue', b.district, cx - 6, cy - 6, cx + 6, cy + 6, 9, [140, 142, 148], false)
+      buildings[buildings.length - 1].art = k
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        trees.push({ x: sx < 0 ? x0 + 9 : x1 - 9, y: sy < 0 ? y0 + 9 : y1 - 9, r: 3 + RD() * 1.5, c: RD() })
+      }
     } else if (b.type === 'park' && b.sb?.kind !== 'bend') {
       const sb = b.sb
+      // rocky hills: an outcrop or two in the roomier plain parks
+      const rocks: Rect[] = []
+      if (!sb && x1 - x0 > 60 && y1 - y0 > 60 && RD() < 0.4) {
+        const n = 1 + (RD() < 0.4 ? 1 : 0)
+        for (let q = 0; q < n; q++) {
+          const rw = 12 + RD() * 14,
+            rh = 12 + RD() * 14
+          const rx = x0 + 10 + RD() * Math.max(0, x1 - x0 - 20 - rw),
+            ry = y0 + 10 + RD() * Math.max(0, y1 - y0 - 20 - rh)
+          const r: Rect = { x0: rx, y0: ry, x1: rx + rw, y1: ry + rh }
+          if (rocks.some((o) => r.x0 < o.x1 + 4 && r.x1 > o.x0 - 4 && r.y0 < o.y1 + 4 && r.y1 > o.y0 - 4)) continue
+          rocks.push(r)
+          push('rock', b.district, r.x0, r.y0, r.x1, r.y1, 8 + RD() * 6, [112, 108, 102], false)
+          buildings[buildings.length - 1].art = (RD() * 1000) | 0
+        }
+      }
       for (let ty = y0 + 8; ty < y1 - 4; ty += 13) {
         for (let tx = x0 + 8; tx < x1 - 4; tx += 13) {
           if (R() < 0.7) {
             const t: Tree = { x: tx + (R() - 0.5) * 8, y: ty + (R() - 0.5) * 8, r: 3 + R() * 2.5, c: R() }
+            if (rocks.some((o) => t.x > o.x0 - t.r && t.x < o.x1 + t.r && t.y > o.y0 - t.r && t.y < o.y1 + t.r)) continue // none growing out of a rock
             if (sb) {
               const clear = sb.ro + t.r + 3 // no canopy over a roundabout
               if ((t.x - sb.cx) * (t.x - sb.cx) + (t.y - sb.cy) * (t.y - sb.cy) < clear * clear) continue

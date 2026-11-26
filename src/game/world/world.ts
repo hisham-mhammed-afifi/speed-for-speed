@@ -446,6 +446,7 @@ export const World = {
         const b = blockAt(x, y)
         if (!b) return SURF.lot
         if (x < b.x0 + SIDEWALK || x > b.x1 - SIDEWALK || y < b.y0 + SIDEWALK || y > b.y1 - SIDEWALK) return SURF.sidewalk
+        if (b.type === 'sand') return SURF.sand
         return b.type === 'park' || b.district === 'suburbs' ? SURF.grass : SURF.lot
       },
       /** True inside a building or (a little) around a highway barrier: "something solid in the way" for AI probes and line of sight. */

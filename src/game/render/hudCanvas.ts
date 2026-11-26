@@ -31,7 +31,16 @@ function tileMap(t: Tile): HTMLCanvasElement {
   // a tint per district so you can tell where you are at a glance
   const tint = { downtown: '#222833', port: '#2d2a25', suburbs: '#24302a' } as const
   for (const bl of t.blocks) {
-    x.fillStyle = bl.type === 'park' ? '#25472c' : bl.type === 'plaza' ? '#3a3e45' : tint[bl.district]
+    x.fillStyle =
+      bl.type === 'park'
+        ? '#25472c'
+        : bl.type === 'plaza'
+          ? '#3a3e45'
+          : bl.type === 'square'
+            ? '#5a5f68'
+            : bl.type === 'sand'
+              ? '#8a7548'
+              : tint[bl.district]
     x.fillRect(bl.x0, bl.y0, bl.x1 - bl.x0, bl.y1 - bl.y0)
   }
   // bend parks (lawn over the removed streets) and roundabouts
@@ -63,7 +72,18 @@ function tileMap(t: Tile): HTMLCanvasElement {
     x.stroke()
   }
   for (const bd of t.buildings) {
-    x.fillStyle = bd.kind === 'container' ? '#3b2f2b' : bd.kind === 'house' ? '#2f3a30' : bd.kind === 'tower' ? '#1c2029' : '#26231f'
+    x.fillStyle =
+      bd.kind === 'container'
+        ? '#3b2f2b'
+        : bd.kind === 'house'
+          ? '#2f3a30'
+          : bd.kind === 'tower'
+            ? '#1c2029'
+            : bd.kind === 'rock'
+              ? '#5b5750'
+              : bd.kind === 'statue'
+                ? '#d6d9df'
+                : '#26231f'
     x.fillRect(bd.x0, bd.y0, bd.x1 - bd.x0, bd.y1 - bd.y0)
   }
   // the river, its bridges and the tunnels (a dark line so you can plan an escape route)
