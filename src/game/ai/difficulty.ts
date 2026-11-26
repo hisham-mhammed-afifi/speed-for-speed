@@ -90,7 +90,7 @@ export const Difficulty = {
     Difficulty.k = knobsFor(Difficulty.eff())
   },
 
-  load(save: SaveData, skillParam?: string | null): void {
+  load(save: Partial<SaveData>, skillParam?: string | null): void {
     const r = save.skill
     Difficulty.rating = typeof r === 'number' && Number.isFinite(r) ? clamp(r, MIN_RATING, MAX_RATING) : DEFAULT_RATING
     Difficulty.fixed = !!save.fixedSkill

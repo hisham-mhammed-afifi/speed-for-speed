@@ -3,6 +3,7 @@ import { Phys } from '../physics/world'
 import { game } from '../state'
 import { Difficulty } from './difficulty'
 import { Memory } from './memory'
+import { Combo } from '../progress/combo'
 import { Police } from './police'
 import { Tactics } from './tactics'
 import { DISTRICT_NAMES } from '../types'
@@ -193,6 +194,7 @@ export class HeatManager {
     this.points += 14
     this.copsDown++
     game.toast('COP DOWN  +$500', '#ffd23f')
+    Combo.takedown()
   }
 
   onCivilCrash(): void {

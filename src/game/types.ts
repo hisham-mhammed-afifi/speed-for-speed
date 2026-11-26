@@ -66,6 +66,10 @@ export interface RunStats {
   /** wanted rating before and after this run */
   skillBefore?: number
   skillAfter?: number
+  /** wallet after this run, and the best combo multiplier and skill money earned during it */
+  cash?: number
+  bestMult?: number
+  skillCash?: number
 }
 
 export interface SaveData {
@@ -80,6 +84,36 @@ export interface SaveData {
   fixedSkill?: boolean
   /** graphics setting: auto, high, medium or low (see render/quality.ts) */
   quality?: string
+  /** save format: 2 = has the wallet, garage and daily challenges */
+  v: number
+  /** money you can spend in the garage (banked bounty and combo cash) */
+  cash: number
+  /** ids of the cars you own */
+  owned: string[]
+  /** car id -> level (0..3) of the engine, tyres, armour and nitro upgrades (see progress/economy.ts) */
+  upgrades: Record<string, number[]>
+  /** today's three challenges (see progress/daily.ts) */
+  daily?: DailyState
+  /** consecutive days with all three challenges done, and the last day that happened (YYYY-MM-DD) */
+  streak: number
+  lastDailyDone?: string
+  /** lifetime counters */
+  stats: LifetimeStats
+}
+
+export interface LifetimeStats {
+  nearMisses: number
+  driftSec: number
+  airSec: number
+  escapes: number
+  bestCombo: number
+}
+
+export interface DailyState {
+  date: string
+  ids: string[]
+  progress: number[]
+  done: boolean[]
 }
 
 export interface Safe {

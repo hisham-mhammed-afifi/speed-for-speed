@@ -57,6 +57,16 @@ export function HudOverlay() {
             <i style={{ width: `${Math.min(100, hud.evadeFrac * 100)}%` }} />
           </div>
         )}
+        {(hud.combo > 0 || hud.mult > 1) && (
+          <div className="hud-combo">
+            <span>
+              COMBO &nbsp;<b>${hud.combo.toLocaleString()}</b> &nbsp;x{hud.mult}
+            </span>
+            <div className="hud-meter combo">
+              <i style={{ width: `${Math.round(hud.comboT * 100)}%` }} />
+            </div>
+          </div>
+        )}
         {hud.bust > 0.01 && (
           <>
             <div className="hud-bust">BUSTED</div>

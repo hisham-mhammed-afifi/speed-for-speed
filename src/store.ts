@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { DEFAULT_SAVE } from './game/save'
 import type { RunResult, RunStats, SaveData } from './game/types'
 
 /**
@@ -25,6 +26,10 @@ export interface HudSnapshot {
   evadeFrac: number
   bust: number
   hint: boolean
+  /** skill combo: money waiting to be banked, the multiplier and how much time is left (0..1) */
+  combo: number
+  mult: number
+  comboT: number
 }
 
 export interface ResultState {
@@ -53,7 +58,7 @@ interface GameStore {
   clearToasts(): void
 }
 
-export const EMPTY_HUD: HudSnapshot = { active: false, level: 0, bounty: 0, visible: false, evadeLeft: 0, evadeFrac: 0, bust: 0, hint: true }
+export const EMPTY_HUD: HudSnapshot = { active: false, level: 0, bounty: 0, visible: false, evadeLeft: 0, evadeFrac: 0, bust: 0, hint: true, combo: 0, mult: 1, comboT: 0 }
 
 const TOAST_MS = 4000
 let toastId = 1
@@ -63,7 +68,7 @@ export const useGameStore = create<GameStore>()((set) => ({
   loadProgress: 0,
   selectedCar: 0,
   result: null,
-  save: { best: 0, total: 0, longest: 0, car: 0 },
+  save: DEFAULT_SAVE,
   hud: EMPTY_HUD,
   toasts: [],
   touchActive: false,

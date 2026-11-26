@@ -15,6 +15,10 @@ import { FX } from './render/effects'
 import { drawHudCanvas } from './render/hudCanvas'
 import { Renderer } from './render/renderer'
 import { loadSave, writeSave } from './save'
+import { Combo } from './progress/combo'
+import { ensureDaily, trackDaily } from './progress/daily'
+import type { StatKey } from './progress/daily'
+import { applyUpgrades, buyCar, buyUpgrade, levelsOf, owns } from './progress/economy'
 import { game } from './state'
 import { carGrid } from './world/carGrid'
 import { Props } from './world/props'
@@ -57,6 +61,8 @@ class GameEngine {
   private lastDistrict: District | null = null
   private carIndex = 0
   private saveData: SaveData = loadSave()
+  private saveDirty = false
+  private saveT = 0
   private params = new URLSearchParams()
   private assets: Promise<void> | null = null
 
@@ -100,6 +106,8 @@ class GameEngine {
       game.heat = heat
       heat.reset()
       this.saveData = loadSave()
+      ensureDaily(this.saveData)
+      Combo.sinks = { cash: (n) => this.addCash(n), stat: (k, n) => this.onSkillStat(k, n) }
       this.carIndex = Math.min(this.saveData.car, PLAYER_CARS.length - 1)
       Memory.load(this.saveData.memory)
       Difficulty.load(this.saveData, this.params.get('skill'))
@@ -200,6 +208,8 @@ class GameEngine {
         const dv = a === pl ? dvA : dvB
         if (dv > 2) camera.addShake(Math.min(0.9, dv / 20))
         const other = a === pl ? b : a
+        if (dv > 0.5) Combo.markHit(other)
+        if (dv > 3) Combo.lose()
         if (!other) return
         if (other.kind === 'police' && !heat.active && dv > 1) heat.start('COLLISION')
         else if (other.kind === 'civil' && dv > 3) {
@@ -213,8 +223,12 @@ class GameEngine {
 
   // ---------------------------------------------------------------- run control (called from React)
   startGame(idx: number): void {
+    // only cars you own can be driven
+    if (!owns(this.saveData, PLAYER_CARS[idx].id)) idx = Math.max(0, PLAYER_CARS.findIndex((c) => owns(this.saveData, c.id)))
     this.carIndex = idx
     this.saveData.car = idx
+    ensureDaily(this.saveData)
+    Combo.reset()
     writeSave(this.saveData)
     store().setSave({ ...this.saveData })
     store().setSelectedCar(idx)
@@ -232,7 +246,8 @@ class GameEngine {
       nb = city.neighbors(n)
     const to = nb[0]
     const p = city.lanePoint(n, to, 0.5)
-    const spec = PLAYER_CARS[idx]
+    const base = PLAYER_CARS[idx]
+    const spec = applyUpgrades(base, levelsOf(this.saveData, base.id))
     const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'player')
     game.player = { car, spec }
     if (Phys.streaming) Phys.streamStatics(p.x, p.y)
@@ -258,8 +273,20 @@ class GameEngine {
 
   private endRun(kind: RunResult): void {
     if (game.state !== 'play') return
+    if (kind === 'escaped') Combo.bank() // a chain still running when you get away is paid out first
+    else Combo.lose()
     const stats: RunStats = { time: heat.time, level: heat.level, copsDown: heat.copsDown, bounty: heat.bounty, best: this.saveData.best }
+    stats.bestMult = Combo.bestMult
+    stats.skillCash = Combo.earned
+    this.saveData.stats.bestCombo = Math.max(this.saveData.stats.bestCombo, Combo.bestMult)
     if (kind === 'escaped') {
+      const won = Math.floor(heat.bounty)
+      this.saveData.cash += won // the bounty is only yours once you have got away
+      this.saveData.stats.escapes++
+      this.onSkillStat('escapes', 1)
+      if (heat.level >= 3) this.onSkillStat('escape3', 1)
+      if (won >= 5000) this.onSkillStat('bank5k', 1)
+      if (heat.time <= 90) this.onSkillStat('fastEscape', 1)
       this.saveData.total += Math.floor(heat.bounty)
       this.saveData.best = Math.max(this.saveData.best, Math.floor(heat.bounty))
       this.saveData.longest = Math.max(this.saveData.longest, Math.floor(heat.time))
@@ -273,13 +300,60 @@ class GameEngine {
     stats.skillAfter = sk.after
     this.saveData.skill = Difficulty.rating
     this.saveData.fixedSkill = Difficulty.fixed
-    writeSave(this.saveData)
-    store().setSave({ ...this.saveData })
+    stats.cash = this.saveData.cash
+    this.flushSave()
     game.state = 'result'
     loop.paused = true
     this.pushHud(true)
     store().setResult({ kind, stats })
     store().setScreen('result')
+  }
+
+  // ---------------------------------------------------------------- wallet, garage and daily challenges
+  private addCash(n: number): void {
+    this.saveData.cash += n
+    this.saveDirty = true
+  }
+
+  /** Write the save to storage and refresh what the UI shows. */
+  private flushSave(): void {
+    this.saveDirty = false
+    this.saveT = 0
+    writeSave(this.saveData)
+    store().setSave({ ...this.saveData })
+  }
+
+  /** A skill happened: count it for the lifetime stats and the daily challenges, and announce any challenge that is now done. */
+  private onSkillStat(stat: StatKey, amount: number): void {
+    const st = this.saveData.stats
+    if (stat === 'near') st.nearMisses += amount
+    else if (stat === 'drift') st.driftSec += amount
+    else if (stat === 'air') st.airSec += amount
+    this.saveDirty = true
+    for (const e of trackDaily(this.saveData, stat, amount)) {
+      game.toast(`DAILY DONE: ${e.challenge.text}  +$${e.reward.toLocaleString()}`, '#7be08a')
+      if (e.allDone) game.toast(`ALL DAILY CHALLENGES DONE  streak ${e.streak}`, '#ffd23f')
+    }
+  }
+
+  /** Buy a car in the garage. Returns whether it worked. */
+  buyCar(id: string): boolean {
+    const ok = buyCar(this.saveData, id)
+    if (ok) this.flushSave()
+    return ok
+  }
+
+  buyUpgrade(id: string, track: number): boolean {
+    const ok = buyUpgrade(this.saveData, id, track)
+    if (ok) this.flushSave()
+    return ok
+  }
+
+  /** Make sure today's challenges are in the save (the page may have been open since yesterday). */
+  refreshDaily(): void {
+    const d = this.saveData.daily?.date
+    ensureDaily(this.saveData)
+    if (d !== this.saveData.daily?.date) this.flushSave()
   }
 
   /** Freeze or unfreeze the adaptive difficulty. Returns the new state. */
@@ -318,6 +392,7 @@ class GameEngine {
 
   togglePause(): void {
     if (game.state === 'play') {
+      this.flushSave()
       game.state = 'paused'
       loop.paused = true
       store().setScreen('paused')
@@ -521,6 +596,9 @@ class GameEngine {
     Traffic.update(dt)
     Police.update(dt)
     heat.update(dt)
+    Combo.update(dt, pl)
+    this.saveT += dt
+    if (this.saveDirty && this.saveT > 5) this.flushSave()
     for (let i = 0; i < game.cars.length; i++) {
       const c = game.cars[i]
       if (Math.abs(c.x - pl.x) < 90 && Math.abs(c.y - pl.y) < 90) FX.carEffects(c, dt)
@@ -596,6 +674,9 @@ class GameEngine {
       evadeFrac: heat.evadeNeeded ? Math.round((heat.evade / heat.evadeNeeded) * 100) / 100 : 0,
       bust: Math.round(heat.bust * 100) / 100,
       hint: game.time < 14 && !heat.active,
+      combo: Combo.pending,
+      mult: Combo.mult,
+      comboT: Combo.timer > 0 ? Math.round((Combo.timer / 4) * 20) / 20 : 0,
     }
     const cur = store().hud
     if (force || (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== cur[k])) store().setHud(next)

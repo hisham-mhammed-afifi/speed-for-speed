@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findPath } from "./ai/pathfind";
 import { DEFAULT_RATING, Difficulty, scoreRun } from "./ai/difficulty";
 import { loop, MAX_STEPS_PER_FRAME, startLoop, STEP } from "./core/loop";
@@ -31,7 +31,27 @@ import { heat } from "./ai/heat";
 import { BRIDGES, LANE_OFFSET, RAMPS, RIVER_I, SURF, TILE } from "./world/city";
 import type { Tile } from "./world/city";
 import { createCity, World } from "./world/world";
-import type { Building } from "./types";
+import type { Building, SaveData } from "./types";
+import { migrateSave } from "./save";
+import { Combo } from "./progress/combo";
+import {
+  activeStreak,
+  challengeById,
+  ensureDaily,
+  pickDaily,
+  trackDaily,
+  yesterdayKey,
+} from "./progress/daily";
+import {
+  applyUpgrades,
+  buyCar,
+  buyUpgrade,
+  carPrice,
+  levelsOf,
+  MAX_LEVEL,
+  nextUnlock,
+  upgradeCost,
+} from "./progress/economy";
 
 const DT = 1 / 120;
 
@@ -1591,6 +1611,15 @@ describe("bends and roundabouts", () => {
 
 describe("right of way and roundabouts", () => {
   let city = World.build(0, 0, 1);
+  // route choices use Math.random: a fixed sequence keeps these simulations reproducible
+  const realRandom = Math.random;
+  beforeEach(() => {
+    let seed = 7;
+    Math.random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  });
+  afterEach(() => {
+    Math.random = realRandom;
+  });
   beforeEach(() => {
     World.init();
     city = World.build(0, 0, 1);
@@ -1906,5 +1935,213 @@ describe("no escaping in a straight line", () => {
   it("real turns still let you shake them", () => {
     const endRun = drive(40, 1.2, 4);
     expect(endRun).toHaveBeenCalledWith("escaped");
+  });
+});
+
+describe("cash, garage, combos and daily challenges", () => {
+  const fresh = (): SaveData => migrateSave({});
+
+  it("an old save turns its banked bounty into cash and keeps the car you last drove", () => {
+    const s = migrateSave({ best: 900, total: 4200, longest: 60, car: 3 } as Partial<SaveData>);
+    expect(s.v).toBe(2);
+    expect(s.cash).toBe(4200);
+    expect(s.owned).toEqual([PLAYER_CARS[0].id, PLAYER_CARS[3].id]);
+    expect(s.streak).toBe(0);
+    // a current save is left alone
+    const again = migrateSave({ ...s, cash: 17 });
+    expect(again.cash).toBe(17);
+    expect(again.owned).toEqual(s.owned);
+    // junk does not crash
+    expect(migrateSave({ cash: Number.NaN, owned: [] as string[] } as Partial<SaveData>).owned).toEqual([PLAYER_CARS[0].id]);
+  });
+
+  it("cars and upgrades cost money, and only affordable purchases go through", () => {
+    const s = fresh();
+    const rose = PLAYER_CARS[1].id;
+    expect(carPrice(PLAYER_CARS[0].id)).toBe(0);
+    expect(buyCar(s, rose)).toBe(false); // no money
+    expect(s.owned).not.toContain(rose);
+    s.cash = carPrice(rose) + 100;
+    expect(buyCar(s, rose)).toBe(true);
+    expect(s.cash).toBe(100);
+    expect(buyCar(s, rose)).toBe(false); // already owned
+    expect(buyUpgrade(s, rose, 0)).toBe(false); // too poor
+    s.cash = 1e6;
+    for (let i = 0; i < MAX_LEVEL; i++) expect(buyUpgrade(s, rose, 1)).toBe(true);
+    expect(buyUpgrade(s, rose, 1)).toBe(false); // maxed
+    expect(levelsOf(s, rose)).toEqual([0, MAX_LEVEL, 0, 0]);
+    expect(buyUpgrade(s, PLAYER_CARS[5].id, 0)).toBe(false); // not owned
+    expect(upgradeCost(rose, 2)).toBeGreaterThan(upgradeCost(rose, 0));
+    expect(nextUnlock(s)?.price).toBeGreaterThan(0);
+  });
+
+  it("upgrades make a better copy of the car and never touch the catalogue", () => {
+    const base = PLAYER_CARS[2];
+    const top = base.top;
+    expect(applyUpgrades(base, undefined)).toBe(base);
+    const up = applyUpgrades(base, [3, 3, 3, 3]);
+    expect(up.top).toBeCloseTo(top * 1.12);
+    expect(up.accel).toBeCloseTo(base.accel * 1.18);
+    expect(up.grip).toBeCloseTo(base.grip * 1.12);
+    expect(up.durability).toBeCloseTo(base.durability * 1.36);
+    expect(up.nitroPower).toBeGreaterThan(base.nitroPower);
+    expect(base.top).toBe(top);
+    expect(estimate(up).t100).toBeLessThan(estimate(base).t100);
+  });
+
+  it("the same date always brings the same three different challenges", () => {
+    const a = pickDaily("2026-11-26"),
+      b = pickDaily("2026-11-26");
+    expect(a).toEqual(b);
+    expect(new Set(a).size).toBe(3);
+    expect(new Set(a.map((id) => challengeById(id)!.stat)).size).toBe(3);
+    const days = new Set<string>();
+    for (let d = 1; d <= 20; d++) days.add(pickDaily(`2026-12-${String(d).padStart(2, "0")}`).join());
+    expect(days.size).toBeGreaterThan(5); // it does change from day to day
+  });
+
+  it("a challenge pays once when finished, and finishing all three builds the streak", () => {
+    const s = fresh();
+    const day1 = "2026-03-10";
+    const d = ensureDaily(s, day1);
+    const stats = d.ids.map((id) => challengeById(id)!);
+    let paid = 0;
+    for (let i = 0; i < 3; i++) {
+      const c = stats[i];
+      // half way: nothing yet
+      if (c.goal > 1) expect(trackDaily(s, c.stat, c.goal / 2, day1)).toHaveLength(0);
+      const ev = trackDaily(s, c.stat, c.goal, day1);
+      expect(ev).toHaveLength(1);
+      paid += ev[0].reward;
+      expect(trackDaily(s, c.stat, c.goal, day1)).toHaveLength(0); // done: no second payout
+    }
+    expect(s.cash).toBe(paid);
+    expect(s.streak).toBe(1);
+    expect(s.lastDailyDone).toBe(day1);
+    expect(activeStreak(s, day1)).toBe(1);
+    expect(activeStreak(s, "2026-03-11")).toBe(1); // still alive the next day
+    expect(activeStreak(s, "2026-03-12")).toBe(0); // a missed day breaks it
+    // the next day: a fresh set, and finishing it extends the streak
+    const day2 = "2026-03-11";
+    const d2 = ensureDaily(s, day2);
+    expect(d2.date).toBe(day2);
+    expect(d2.done.some(Boolean)).toBe(false);
+    for (const id of d2.ids) trackDaily(s, challengeById(id)!.stat, 1000, day2);
+    expect(s.streak).toBe(2);
+    // a gap resets it to 1
+    const day5 = "2026-03-15";
+    for (const id of ensureDaily(s, day5).ids) trackDaily(s, challengeById(id)!.stat, 1000, day5);
+    expect(s.streak).toBe(1);
+    expect(yesterdayKey("2026-03-01")).toBe("2026-02-28");
+  });
+
+  describe("combos", () => {
+    const cash: number[] = [],
+      stats: [string, number][] = [];
+    beforeEach(() => {
+      cash.length = 0;
+      stats.length = 0;
+      game.heat = heat;
+      heat.reset();
+      Combo.reset();
+      Combo.sinks = { cash: (n) => cash.push(n), stat: (k, n) => stats.push([k, n]) };
+    });
+
+    it("each skill raises the multiplier, and the chain pays out when it runs out", () => {
+      Combo.add(100, "A");
+      expect(Combo.pending).toBe(100);
+      expect(Combo.mult).toBe(1.25);
+      Combo.add(100, "B");
+      expect(Combo.pending).toBe(225); // 100 + 100 * 1.25
+      const pl = new Car(PLAYER_CARS[0], "player");
+      carGrid.rebuild([pl]);
+      for (let t = 0; t < 4.2 * 60; t++) Combo.update(1 / 60, pl);
+      expect(Combo.pending).toBe(0);
+      expect(Combo.mult).toBe(1);
+      expect(cash).toEqual([113]); // free roam: half goes straight to the wallet
+      expect(Combo.earned).toBe(113);
+    });
+
+    it("in a pursuit the money goes onto the bounty, scaled by the heat level, and a crash loses it", () => {
+      const car = new Car(PLAYER_CARS[0], "player");
+      car.place(0, 0, 0);
+      game.player = { car, spec: PLAYER_CARS[0] };
+      heat.start("TEST", 3);
+      const before = heat.bounty;
+      Combo.add(200, "A");
+      Combo.bank();
+      expect(heat.bounty - before).toBe(Math.round(200 * (1 + 0.25 * 3)));
+      expect(cash).toHaveLength(0);
+      Combo.add(500, "B");
+      Combo.lose();
+      expect(Combo.pending).toBe(0);
+      expect(Combo.mult).toBe(1);
+      const b2 = heat.bounty;
+      Combo.bank();
+      expect(heat.bounty).toBe(b2); // nothing left to bank
+      heat.reset();
+    });
+
+    it("the multiplier is capped and reaching x3 is reported once", () => {
+      for (let i = 0; i < 30; i++) Combo.add(10, "S");
+      expect(Combo.mult).toBe(5);
+      expect(Combo.bestMult).toBe(5);
+      expect(stats.filter(([k]) => k === "mult3")).toHaveLength(1);
+    });
+
+    // a player doing 20 m/s passes a civilian coming the other way, 2.5 m to the side
+    const pass = (touch: boolean): number => {
+      const pl = new Car(PLAYER_CARS[0], "player"),
+        civ = new Car(TRAFFIC_CARS[0], "civil");
+      pl.place(0, 0, 0);
+      pl.setSpeed(20);
+      civ.place(70, -2.5, Math.PI);
+      civ.setSpeed(20);
+      let hits = 0;
+      for (let t = 0; t < 4 * 60; t++) {
+        pl.x += (20 / 60) * 1;
+        civ.x -= 20 / 60;
+        carGrid.rebuild([pl, civ]);
+        if (touch && Math.abs(pl.x - civ.x) < 4) Combo.markHit(civ);
+        Combo.update(1 / 60, pl);
+      }
+      for (const [k] of stats) if (k === "near") hits++;
+      return hits;
+    };
+
+    it("a close pass at speed is a near miss, and touching the car cancels it", () => {
+      expect(pass(false)).toBe(1);
+      expect(Combo.pending).toBeGreaterThanOrEqual(60);
+      stats.length = 0;
+      Combo.reset();
+      expect(pass(true)).toBe(0);
+      expect(Combo.pending).toBe(0);
+    });
+
+    it("a slow pass, or a wide one, is not a near miss", () => {
+      const pl = new Car(PLAYER_CARS[0], "player"),
+        civ = new Car(TRAFFIC_CARS[0], "civil");
+      pl.place(0, 0, 0);
+      pl.setSpeed(8); // too slow
+      civ.place(40, -2.5, Math.PI);
+      civ.setSpeed(8);
+      for (let t = 0; t < 4 * 60; t++) {
+        pl.x += 8 / 60;
+        civ.x -= 8 / 60;
+        carGrid.rebuild([pl, civ]);
+        Combo.update(1 / 60, pl);
+      }
+      pl.place(0, 0, 0);
+      pl.setSpeed(20);
+      civ.place(70, -5, Math.PI); // a whole lane away
+      civ.setSpeed(20);
+      for (let t = 0; t < 4 * 60; t++) {
+        pl.x += 20 / 60;
+        civ.x -= 20 / 60;
+        carGrid.rebuild([pl, civ]);
+        Combo.update(1 / 60, pl);
+      }
+      expect(stats.filter(([k]) => k === "near")).toHaveLength(0);
+    });
   });
 });

@@ -52,6 +52,7 @@ src/
     state.ts                 the shared `game` context every module reads (keeps imports cycle-free)
     core/                    math, input (keyboard/gamepad/touch), loop, assets, viewport
     data/cars.ts             car specs + car-select stats
+    progress/                economy (prices, upgrades, buying), combo (skill chains), daily (challenges and streak)
     physics/                 car.ts (arcade car on a Matter body), world.ts (Matter engine, impacts)
     world/                   city.ts (types, road widths), layout.ts (road lines per tile column/row), tile.ts (one tile: districts, buildings, river, tunnels, jumps), world.ts (the endless world: tile cache and the 3x3 window), traffic.ts (lane drivers), carGrid.ts (spatial grid), props.ts (smashable props)
     ai/                      pathfind (A*), drive, police units, heat (pursuit, roadblocks, spikes, helicopter)
@@ -128,6 +129,21 @@ Adaptive difficulty (`ai/difficulty.ts`): a 0..1 wanted rating (default 0.4 = ba
 busts lower it. It scales the cop count, their speed boost and reaction time, how close new units spawn, roadblock/spike frequency, how long
 you must stay hidden, and how many units try to cut you off. It shows on the car-select and result screens; the pause menu can freeze it
 ("Difficulty: Fixed"). `?skill=0..1` overrides it for testing (and is never saved). In a bot test, escape rate fell from 83% (0.1) to 28% (0.4) to 11% (0.9).
+
+## Progression (why there is a next run)
+Everything is saved in the browser (`localStorage`, key `heatline.v1`, save format `v: 2`); there is no server.
+
+- **Bounty is only yours if you escape.** An escape banks the whole bounty into your wallet (`cash`); a bust or a wreck loses it.
+- **Garage** (`progress/economy.ts`): all cars except the first cost money, and each owned car has four upgrades (engine, tyres, armour,
+  nitro, three levels each). `applyUpgrades` returns a modified copy of the car's specs, so the catalogue is never changed and the stat bars
+  show the upgrades. Old saves are migrated once: their total banked bounty becomes cash and the last car driven stays unlocked (`save.ts`).
+- **Skill combos** (`progress/combo.ts`): near misses (a fast pass within 3.2 m of another car without touching it), drifts, jumps and cop
+  takedowns raise a multiplier (x1 to x5) and a chain timer of 4 s. When it runs out the money is banked: onto your bounty during a pursuit
+  (so it is at risk, scaled by the heat level) or half of it into your wallet in free roam. Crashing loses the chain. The checks run at 30 Hz
+  with no allocation.
+- **Daily challenges** (`progress/daily.ts`): three challenges per local date, picked by a seeded hash so everybody gets the same ones that
+  day. Each pays once when done; finishing all three keeps a streak (up to +50% rewards).
+- Tests cover the migration, buying rules, upgrade maths, daily picks and streak, and the combo and near-miss logic.
 
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.

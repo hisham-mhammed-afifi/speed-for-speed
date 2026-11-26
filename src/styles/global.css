@@ -136,3 +136,56 @@ p { margin: 0; line-height: 1.5; max-width: 62ch; }
   .stat { font-size: 12px; }
   .carinfo > .sub:last-child, .stat:last-child { display: none; }
 }
+
+/* ---------- garage, wallet, daily challenges, combo ---------- */
+.garage-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.garage-head h2 { margin: 0; }
+.wallet { font-size: 26px; font-weight: 800; color: #7be08a; }
+.preview { position: relative; }
+.preview.locked img { filter: grayscale(1) brightness(0.55) drop-shadow(0 12px 14px rgba(0, 0, 0, 0.6)); }
+.lock-tag { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 3px 12px; font-weight: 800; color: #ffd23f; }
+.upgrades { display: flex; flex-direction: column; gap: 6px; }
+.upgrade { display: grid; grid-template-columns: 90px 1fr 96px; align-items: center; gap: 10px; font-size: 14px; }
+.up-name { color: rgba(238, 242, 247, 0.8); }
+.pips { display: flex; gap: 6px; }
+.pips i { width: 34px; height: 10px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); }
+.pips i.on { background: linear-gradient(90deg, #ffd23f, #ff9a3c); }
+button.small { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+button:disabled { opacity: 0.4; cursor: default; }
+button:disabled:hover { background: rgba(255, 255, 255, 0.08); }
+button.primary:disabled:hover { background: linear-gradient(180deg, #ff4a4a, #c91f2e); }
+.buy { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.res-stats b.good { color: #7be08a; }
+.res-stats b.bad { color: #ff4a4a; }
+.daily { display: flex; flex-direction: column; gap: 8px; width: min(92vw, 460px); text-align: left; background: rgba(14, 17, 22, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 12px 16px; }
+.panel .daily { width: 100%; background: rgba(255, 255, 255, 0.04); }
+.daily-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: #aab3c0; }
+.daily-head b { color: #ffd23f; font-size: 14px; }
+.daily-head em { color: #7be08a; font-style: normal; }
+.daily-text { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin-bottom: 3px; }
+.daily-text b { font-weight: 600; font-size: 12px; color: #aab3c0; white-space: nowrap; }
+.daily-row .bar i { background: linear-gradient(90deg, #ffd23f, #ff9a3c); }
+.daily-row.done .bar i { background: #7be08a; }
+.daily-row.done .daily-text b { color: #7be08a; }
+.hud-combo { margin-top: calc(var(--s) * 8px); font-size: calc(var(--s) * 15px); font-weight: 800; color: #7be0ff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); }
+.hud-combo b { color: #ffd23f; }
+.hud-meter.combo { width: calc(var(--s) * 160px); height: calc(var(--s) * 5px); margin-top: calc(var(--s) * 3px); }
+.hud-meter.combo i { background: #7be0ff; }
+@media (max-width: 600px) {
+  .upgrade { grid-template-columns: 70px 1fr 84px; }
+  .pips i { width: 26px; }
+}
+@media (max-height: 460px) {
+  .daily { padding: 8px 12px; gap: 4px; }
+  .upgrades { gap: 3px; }
+  .garage-head h2 { font-size: 20px; }
+  .wallet { font-size: 20px; }
+}
+/* a menu taller than the screen (a phone on its side) scrolls from its top instead of being clipped */
+.screen { justify-content: safe center; }
+@media (max-height: 460px) {
+  h1 { font-size: 44px; }
+  .screen { gap: 8px; }
+  .menu { min-width: 220px; gap: 6px; }
+  .menu button { padding: 8px 18px; }
+}
