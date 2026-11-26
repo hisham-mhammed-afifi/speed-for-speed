@@ -49,6 +49,8 @@ export interface CarSpec {
   redline: number
   police?: boolean
   heavy?: boolean
+  /** a lorry or pickup: only ever seen in traffic, long and heavy (the lane drivers keep more room around it) */
+  truck?: boolean
   /** a motorcycle: narrow, light, leans into turns, and a hard crash throws the rider */
   bike?: boolean
   /** side-view sprite (the flank you see when the bike leans, and the garage picture) */

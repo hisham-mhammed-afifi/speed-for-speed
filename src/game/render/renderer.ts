@@ -698,7 +698,7 @@ function drawCarLights(
     ctx.drawImage(g.red, p.x - 0.6, p.y - 0.6, 1.2, 1.2);
   } else if (car.braking && car.vx > 0.5) {
     for (let k = -1; k <= 1; k += 2) {
-      const p = at(-s.len * 0.5 + 0.25, k * 0.68);
+      const p = at(-s.len * 0.5 + 0.25, k * (s.truck ? s.hitW * 0.36 : 0.68));
       ctx.globalAlpha = 0.85;
       ctx.drawImage(g.red, p.x - 0.8, p.y - 0.8, 1.6, 1.6);
     }

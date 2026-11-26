@@ -83,7 +83,7 @@ export function capForTraffic(car: Car, target: number, maxLook?: number, aimX?:
     }
   }
   const look = maxLook || 8 + car.speed * 1.3
-  const cars = carGrid.query(car.x, car.y, look + 6, nearScratch)
+  const cars = carGrid.query(car.x, car.y, look + 14, nearScratch)
   for (let k = 0; k < cars.length; k++) {
     const o = cars[k]
     if (o === car) continue
@@ -92,10 +92,14 @@ export function capForTraffic(car: Car, target: number, maxLook?: number, aimX?:
     const ahead = dx * fx + dy * fy
     const side = dx * -fy + dy * fx // positive: the other car is on our right
     const oncoming = Math.cos(car.theta - o.theta) < -0.3
+    // how much room the two of us need: half lengths and half widths added up (for two cars that is the old 6.5 m, 2.0 / 2.4 / 3.2 m; lorries ask for more)
+    const gap = car.hx + o.hx,
+      lat = car.hy + o.hy
+    const corridor = Math.max(oncoming ? 2.0 : 2.4, lat + (oncoming ? 0.1 : 0.55))
     // cars are 1.9 m wide and lanes 3.6 m apart: an oncoming car in its own lane passes with room to spare, anything else in our corridor does not
-    if (ahead >= 0 && ahead <= look && (Math.abs(side) < (oncoming ? 2.0 : 2.4) || (o.speed < 1.5 && !oncoming && Math.abs(side) < 3.2))) {
+    if (ahead >= 0 && ahead <= look + Math.max(0, gap - 4.6) && (Math.abs(side) < corridor || (o.speed < 1.5 && !oncoming && Math.abs(side) < Math.max(3.2, lat + 1.3)))) {
       // (a stopped car counts from a little further out to the side: it may be half way through a turn)
-      target = Math.min(target, Math.max(0, (ahead - 6.5) * 0.9))
+      target = Math.min(target, Math.max(0, (ahead - Math.max(6.5, gap + 1.8)) * 0.9))
       continue
     }
     // a car coming in from the side (a turn, a merge, a bend) that will reach our path within a couple of seconds
@@ -112,7 +116,8 @@ export function capForTraffic(car: Car, target: number, maxLook?: number, aimX?:
     if (mx * mx + my * my > 3 * 3) continue
     // priority to the right: give way to a car on our right or right ahead (or any that is very close); the one on our left goes first
     const dist = Math.sqrt(dx * dx + dy * dy)
-    if (side > -1 || dist < 9) target = Math.min(target, Math.max(0, (dist - 8) * 0.7))
+    const room = Math.max(8, gap + 3.4)
+    if (side > -1 || dist < room + 1) target = Math.min(target, Math.max(0, (dist - room) * 0.7))
   }
   return target
 }

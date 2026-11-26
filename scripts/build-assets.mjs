@@ -6,8 +6,10 @@
 //  - lots:   top-down building plots, background cut out, compass icon dropped, 1024 px WebP with alpha
 //  - bikes:  motorcycle-*.jpg (top and side views), background cut out, turned so every bike faces left, 512 px WebP -> public/bikes/
 //
-// `--only bikes` builds just the motorcycles (the tree, grass and lot sources are not needed then):
-//   node scripts/build-assets.mjs "<folder>" --only bikes
+//  - trucks: white-truck / silver-truck / container-truck .jpg (top views), cut out, turned to face left, 768 px WebP -> public/trucks/
+//
+// `--only bikes` or `--only trucks` builds just those (the tree, grass and lot sources are not needed then):
+//   node scripts/build-assets.mjs "<folder>" --only trucks
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -20,8 +22,10 @@ if (!src || !fs.existsSync(src)) {
 }
 const out = path.resolve('public/world')
 const bikesOut = path.resolve('public/bikes')
-if (only !== 'bikes') for (const d of ['trees', 'grass', 'lots']) fs.mkdirSync(path.join(out, d), { recursive: true })
+if (!only) for (const d of ['trees', 'grass', 'lots']) fs.mkdirSync(path.join(out, d), { recursive: true })
 fs.mkdirSync(bikesOut, { recursive: true })
+const trucksOut = path.resolve('public/trucks')
+fs.mkdirSync(trucksOut, { recursive: true })
 
 const file = (id) => path.join(src, `Gemini_Generated_Image_${id}.jpg`)
 
@@ -52,14 +56,14 @@ async function loadRGBA(f) {
 }
 
 /** Near-white, low-chroma pixels connected to the image border are background. Returns a 1 = keep / 0 = background mask. */
-function cutBackground(data, w, h, holes) {
+function cutBackground(data, w, h, holes, bgMin = 205) {
   const isBg = (i) => {
     const r = data[i * 4],
       g = data[i * 4 + 1],
       b = data[i * 4 + 2]
     const mx = Math.max(r, g, b),
       mn = Math.min(r, g, b)
-    return mn > 205 && mx - mn < 16
+    return mn > bgMin && mx - mn < 16
   }
   // grey gaps between branches (shaded white background) count too, but never dark trunks or coloured leaves
   const isHole = (i) => {
@@ -148,9 +152,9 @@ function erode(mask, w, h) {
 }
 
 /** Apply the mask as soft alpha, then trim to the content and (optionally) pad to a square. */
-async function cutout(f, { square, keepLargest, size, holes }) {
+async function cutout(f, { square, keepLargest, size, holes, bgMin }) {
   const { data, w, h } = await loadRGBA(f)
-  let mask = cutBackground(data, w, h, holes)
+  let mask = cutBackground(data, w, h, holes, bgMin)
   if (keepLargest) mask = largestRegion(mask, w, h)
   mask = erode(mask, w, h)
   // soft edge: blur the mask a little
@@ -221,7 +225,7 @@ const save = async (img, rel, opts) => {
   report.push([rel, Math.round(fs.statSync(p).size / 1024) + ' KB'])
 }
 
-if (only !== 'bikes') {
+if (!only) {
   for (const [id, name] of TREES) await save(await cutout(file(id), { square: true, keepLargest: true, size: 192, holes: true }), `trees/${name}.webp`, { quality: 82, alphaQuality: 92 })
   for (const [id, name] of GRASS) await save(await seamlessTile(file(id), { left: 320, top: 0, width: 768, height: 768 }, 256), `grass/${name}.webp`, { quality: 80 })
   for (const [id, name] of LOTS) await save(await cutout(file(id), { square: false, keepLargest: true, size: 1024 }), `lots/${name}.webp`, { quality: 82, alphaQuality: 90 })
@@ -242,6 +246,20 @@ if (!only || only === 'bikes') {
     let side = await cutout(path.join(src, name + '-side.jpg'), { square: false, keepLargest: true, size: 512 })
     if (sideFacesRight) side = sharp(await side.png().toBuffer()).flop()
     await save(side, `../bikes/${id}-side.webp`, { quality: 84, alphaQuality: 92 })
+  }
+}
+
+// trucks (traffic only): [source name, output id, lowest channel value that still counts as background]
+// the white box truck is nearly the colour of its backdrop, so its cut-off is much stricter
+const TRUCKS = [
+  ['white-truck', 'box', 243],
+  ['silver-truck', 'pickup', 205],
+  ['container-truck', 'container', 243],
+]
+if (!only || only === 'trucks') {
+  for (const [name, id, bgMin] of TRUCKS) {
+    const top = await (await cutout(path.join(src, name + '.jpg'), { square: false, keepLargest: true, size: 768, bgMin })).png().toBuffer()
+    await save(sharp(top).rotate(-90), `../trucks/${id}.webp`, { quality: 84, alphaQuality: 92 })
   }
 }
 

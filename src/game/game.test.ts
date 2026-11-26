@@ -22,6 +22,7 @@ import {
   POLICE_SPEC,
   TRAFFIC_BIKES,
   TRAFFIC_CARS,
+  TRAFFIC_TRUCKS,
 } from "./data/cars";
 import { Car } from "./physics/car";
 import { Phys } from "./physics/world";
@@ -34,6 +35,7 @@ import type { Tile } from "./world/city";
 import { createCity, World } from "./world/world";
 import type { Building, SaveData } from "./types";
 import { migrateSave } from "./save";
+import { capForTraffic, speedTo } from "./ai/drive";
 import { Combo } from "./progress/combo";
 import {
   activeStreak,
@@ -1831,7 +1833,7 @@ describe("right of way and roundabouts", () => {
     expect(drv.ring).not.toBeNull();
   });
 
-  it("80 civilians packed into 330 m of town (the game's own density) drive for 90 seconds without a single civilian-civilian collision, and nobody sits stuck", () => {
+  it("110 vehicles (cars, motorcycles and lorries) packed into town drive for 90 seconds without a single civilian-civilian collision, and nobody sits stuck", () => {
     const rnd = (() => {
       let s = 12345;
       return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
@@ -1842,10 +1844,10 @@ describe("right of way and roundabouts", () => {
     };
     const cars: Car[] = [],
       drivers: LaneDriver[] = [];
-    for (let tries = 0; tries < 4000 && cars.length < 80; tries++) {
+    for (let tries = 0; tries < 6000 && cars.length < 110; tries++) {
       const n = city.nodeId(
-        (24 - 5 + rnd() * 10) | 0,
-        (24 - 5 + rnd() * 10) | 0,
+        (24 - 7 + rnd() * 14) | 0,
+        (24 - 7 + rnd() * 14) | 0,
       );
       if (
         city.isDead(n) ||
@@ -1856,23 +1858,26 @@ describe("right of way and roundabouts", () => {
       if (!nb.length) continue;
       const to = nb[(rnd() * nb.length) | 0];
       const p = city.lanePoint(n, to, 0.2 + rnd() * 0.5);
-      if (cars.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 14)) continue;
-      // one vehicle in ten is a motorcycle, as on the real road
-      const car = new Car(
-        cars.length % 10 === 4
-          ? TRAFFIC_BIKES[((cars.length / 10) | 0) % TRAFFIC_BIKES.length]
-          : TRAFFIC_CARS[cars.length % TRAFFIC_CARS.length],
-        "civil",
-      );
+      // one vehicle in ten is a motorcycle and one in eight a lorry or pickup, as on the real road
+      const k = cars.length;
+      const spec =
+        k % 10 === 4
+          ? TRAFFIC_BIKES[((k / 10) | 0) % TRAFFIC_BIKES.length]
+          : k % 8 === 2
+            ? TRAFFIC_TRUCKS[[0, 1, 0, 2][((k / 8) | 0) % 4]]
+            : TRAFFIC_CARS[k % TRAFFIC_CARS.length];
+      if (cars.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 14 + 2 * Math.max(0, spec.len * 0.485 - 2.4))) continue;
+      const car = new Car(spec, "civil");
       Phys.addCar(car);
       car.place(p.x, p.y, Math.atan2(p.uy, p.ux));
       car.setSpeed(6);
       const d = new LaneDriver(city, n, to);
-      d.speedCap = 9 + rnd() * 6;
+      d.speedCap = (9 + rnd() * 6) * (spec.truck ? 0.8 : 1);
       cars.push(car);
       drivers.push(d);
     }
-    expect(cars.length).toBeGreaterThan(40);
+    expect(cars.length).toBeGreaterThan(80);
+    expect(cars.filter((c) => c.spec.truck).length).toBeGreaterThan(8);
     let crashes = 0;
     const was = game.onImpact;
     game.onImpact = (a, b) => {
@@ -2229,5 +2234,110 @@ describe("motorcycles", () => {
     const dirtRoad = drive(bikes.find((b) => b.id === "dirt")!, SURF.asphalt, 6, 3, 0, 1);
     const raceRoad = drive(bikes.find((b) => b.id === "race")!, SURF.asphalt, 6, 3, 0, 1);
     expect(raceRoad.speed).toBeGreaterThan(dirtRoad.speed);
+  });
+});
+
+describe("lorries in traffic", () => {
+  const trucks = TRAFFIC_TRUCKS;
+
+  beforeEach(() => {
+    World.init();
+    Traffic.clearHolds();
+    Phys.init({ buildings: [], walls: [] });
+  });
+
+  it("there are three of them, long and heavy, only in traffic, with their pictures preloaded", () => {
+    expect(trucks.map((t) => t.id)).toEqual(["pickup", "box", "container"]);
+    for (const t of trucks) {
+      expect(t.truck).toBe(true);
+      expect(PLAYER_CARS.some((c) => c.id === t.id)).toBe(false); // never in the garage
+      expect(ALL_CAR_FILES).toContain(t.file);
+      expect(t.mass).toBeGreaterThan(2400);
+      expect(t.len).toBeGreaterThan(Math.max(...PLAYER_CARS.filter((c) => !c.bike).map((c) => c.len)));
+    }
+    expect(trucks[2].len).toBeGreaterThan(trucks[1].len);
+    expect(trucks[1].len).toBeGreaterThan(trucks[0].len);
+  });
+
+  /** a follower comes up to a stopped vehicle in the same lane; returns the gap left between its nose and the other's tail */
+  function followGap(lead: (typeof trucks)[number], follower: (typeof trucks)[number]): { gap: number; speed: number } {
+    Phys.reset();
+    const a = new Car(follower, "civil"),
+      b = new Car(lead, "civil");
+    Phys.addCar(a);
+    Phys.addCar(b);
+    a.place(0, 0, 0);
+    a.setSpeed(10);
+    b.place(70, 0, 0);
+    for (let i = 0; i < 20 * 60; i++) {
+      carGrid.rebuild([a, b]);
+      speedTo(a, capForTraffic(a, 10));
+      a.ctrl.steer = 0;
+      a.applyControls(1 / 60, SURF.asphalt);
+      Phys.step(1 / 60);
+      a.readBack();
+      b.readBack();
+    }
+    return { gap: b.x - b.hx - (a.x + a.hx), speed: a.speed };
+  }
+
+  it("a car stops a safe distance behind a stopped container truck, not with its nose in the trailer", () => {
+    const behindTruck = followGap(trucks[2], TRAFFIC_CARS[0]);
+    expect(behindTruck.speed).toBeLessThan(0.3);
+    expect(behindTruck.gap).toBeGreaterThan(1);
+    // and behind an ordinary car it keeps the distance it always did
+    const behindCar = followGap(TRAFFIC_CARS[1], TRAFFIC_CARS[0]);
+    expect(behindCar.gap).toBeGreaterThan(1);
+    expect(behindCar.gap).toBeLessThan(5);
+  });
+
+  it("a lorry keeps its booking of a junction until its tail is out of it, a car lets go sooner", () => {
+    const city = World.build(0, 0, 1);
+    let n = -1;
+    for (let r = 0; r < 12 && n < 0; r++)
+      for (const [di, dj] of [[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1]]) {
+        const i = 24 + r * 2 + di,
+          j = 24 + dj;
+        const id = city.nodeId(i, j);
+        if (city.neighbors(id).length === 4 && !city.roundAt(id) && i % 16 && j % 16 && city.neighbors(id).every((m) => !city.isCurve(id, m))) {
+          n = id;
+          break;
+        }
+      }
+    expect(n).toBeGreaterThanOrEqual(0);
+    const nb = city.neighbors(n);
+    const west = nb.find((m) => city.nodeX(m) < city.nodeX(n))!,
+      east = nb.find((m) => city.nodeX(m) > city.nodeX(n))!;
+    const hwn = city.nodeHalfWidth(n);
+    const holdAfter = (spec: (typeof trucks)[number], metres: number): boolean => {
+      Traffic.clearHolds();
+      Phys.reset();
+      const car = new Car(spec, "civil");
+      Phys.addCar(car);
+      const len = city.edgeLength(west, n);
+      const p = city.lanePoint(west, n, 1 - 14 / len);
+      car.place(p.x, p.y, Math.atan2(p.uy, p.ux));
+      car.setSpeed(4);
+      const drv = new LaneDriver(city, west, n);
+      drv.next = east;
+      carGrid.rebuild([car]);
+      drv.control(car, 1 / 60);
+      expect(drv.hold).not.toBeNull(); // it booked the junction
+      // it has driven through: now it is `metres` into the road beyond
+      const q = city.edgePoint(n, east, metres, city.laneOffset(n, east), { x: 0, y: 0, ux: 0, uy: 0, len: 0 });
+      car.place(q.x, q.y, Math.atan2(q.uy, q.ux));
+      car.setSpeed(4);
+      drv.a = n;
+      drv.b = east;
+      drv.next = -1;
+      carGrid.rebuild([car]);
+      drv.control(car, 1 / 60);
+      return drv.hold !== null;
+    };
+    const lorry = trucks[2];
+    // 5 m past the junction's edge: a car's tail is clear (its hold is gone), a 9 m lorry is still half inside
+    expect(holdAfter(TRAFFIC_CARS[0], hwn + 5.5)).toBe(false);
+    expect(holdAfter(lorry, hwn + 5.5)).toBe(true);
+    expect(holdAfter(lorry, hwn + 10)).toBe(false);
   });
 });

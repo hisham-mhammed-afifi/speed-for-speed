@@ -1,6 +1,6 @@
 import { clamp, hyp, pick } from '../core/math'
 import { avoid, capForTraffic, speedTo, steerTo } from '../ai/drive'
-import { TRAFFIC_BIKES, TRAFFIC_CARS } from '../data/cars'
+import { TRAFFIC_BIKES, TRAFFIC_CARS, TRAFFIC_TRUCKS } from '../data/cars'
 import { game } from '../state'
 import { carGrid } from './carGrid'
 import type { Car } from '../physics/car'
@@ -175,7 +175,7 @@ export class LaneDriver {
   }
 
   /** The junction ahead: book it, and return the speed we may carry to it (Infinity once the booking is granted). */
-  private junction(car: Car, len: number, toEnd: number, hwn: number): number {
+  private junction(car: Car, len: number, toEnd: number, hwn: number, extra: number): number {
     const city = this.city
     if (this.plain === this.b && this.plainCity === city) return Infinity
     let h = this.hold
@@ -212,25 +212,25 @@ export class LaneDriver {
       this.hold = h
     }
     h.seen = clock
-    if (!h.granted && (toEnd < hwn - 1 || this.canGo(car, h, hwn))) {
+    if (!h.granted && (toEnd < hwn - 1 || this.canGo(car, h, hwn, extra))) {
       h.granted = true // (a car already in the box can't stop there: it goes)
       h.grantedAt = clock
     }
     if (h.granted) return Infinity
-    return Math.max(0, (toEnd - (hwn + 8)) * 0.8) // the stop line is well back, so cars leaving the junction have straightened up by the time they pass the queue
+    return Math.max(0, (toEnd - (hwn + 8 + extra)) * 0.8) // the stop line is well back, so cars leaving the junction have straightened up by the time they pass the queue
   }
 
-  private canGo(car: Car, h: Hold, hwn: number): boolean {
+  private canGo(car: Car, h: Hold, hwn: number, extra: number): boolean {
     for (const o of holds.get(h.node)!) {
       if (o === h || o.dead || compatible(h, o)) continue
       if (o.granted || o.since < h.since) return false // someone is in the junction on a crossing path, or was here first
     }
     // never drive into the junction if the road out of it is full: that is how a junction jams. (Only a very long wait overrides.)
-    return clock - h.since > 25 || !this.exitBlocked(car, h, hwn)
+    return clock - h.since > 25 || !this.exitBlocked(car, h, hwn, extra)
   }
 
   /** A stopped or crawling car on the first stretch of the road we are about to leave by. */
-  private exitBlocked(car: Car, h: Hold, hwn: number): boolean {
+  private exitBlocked(car: Car, h: Hold, hwn: number, extra: number): boolean {
     const city = this.city
     const nx = city.nodeX(this.b),
       ny = city.nodeY(this.b)
@@ -243,7 +243,7 @@ export class LaneDriver {
         ry = o.y - ny
       const along = rx * h.outX + ry * h.outY
       const lat = Math.abs(rx * -h.outY + ry * h.outX - city.laneOffset(this.b, this.next))
-      if (along > hwn - 1 && along < hwn + 16 && lat < 2.6) return true
+      if (along > hwn - 1 && along < hwn + 16 + 2 * extra + Math.max(0, o.hx - 2.4) && lat < 2.6 + Math.max(0, o.hy - 1)) return true
     }
     return false
   }
@@ -354,14 +354,15 @@ export class LaneDriver {
     }
     const rd = city.roundAt(this.b)
     const hwn = city.nodeHalfWidth(this.b)
+    const extra = Math.max(0, car.hx - 2.4) // how much longer than a car this vehicle is (a lorry needs room to clear a junction)
     let cap = Infinity
     let inConn = false
     if (rd && this.next >= 0) {
       // a roundabout: slow down, give way to the ring, then go round it
       cap = 9
-      if (toEnd < rd.ro + 6) {
-        if (!this.ringClear(car, rd.cx, rd.cy, rd.ro)) cap = Math.max(0, (toEnd - (rd.ro + 2)) * 0.8)
-        else if (toEnd <= rd.ro + 3) {
+      if (toEnd < rd.ro + 6 + extra) {
+        if (!this.ringClear(car, rd.cx, rd.cy, rd.ro)) cap = Math.max(0, (toEnd - (rd.ro + 2 + extra)) * 0.8)
+        else if (toEnd <= rd.ro + 3 + extra) {
           city.edgePoint(this.b, this.next, 0, 0, lp)
           const phi0 = Math.atan2(car.y - rd.cy, car.x - rd.cx)
           const phiExit = Math.atan2(lp.uy, lp.ux) + city.laneOffset(this.b, this.next) / rd.rc // where our exit lane leaves the circle
@@ -391,13 +392,15 @@ export class LaneDriver {
       } else inConn = true
     }
     // through the junction we booked: let go of it once we are clear
-    if (this.hold && this.hold.node !== this.b && (this.hold.node !== this.a || t > city.nodeHalfWidth(this.hold.node) + 4)) this.release()
+    if (this.hold && this.hold.node !== this.b && (this.hold.node !== this.a || t > city.nodeHalfWidth(this.hold.node) + 4 + 2 * extra)) this.release()
     else if (this.hold?.dead) this.hold = null
-    if (!rd && this.next >= 0 && toEnd < hwn + Math.max(20, 12 + car.speed * 1.4)) cap = this.junction(car, len, toEnd, hwn)
+    if (!rd && this.next >= 0 && toEnd < hwn + Math.max(20, 12 + car.speed * 1.4)) cap = this.junction(car, len, toEnd, hwn, extra)
     const w = city.edgeWidth(this.a, this.b)
     const lane = city.laneOffset(this.a, this.b)
     // pulling over means into the parking strip / shoulder, not the middle of the road
-    const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge + (w >= 28 ? this.hwyLane : 0)
+    // a lorry swings wider than a car as it straightens up after a turn, so it keeps a little closer to its own kerb
+    const kerb = car.spec.truck && w >= 10 && w < 28 ? 0.45 : 0
+    const off = (this.pullOver ? Math.min(w / 2 - 1.3, lane + 1.8) : lane) + this.nudge + kerb + (w >= 28 ? this.hwyLane : 0)
     const la = clamp(6 + car.speed * 0.55, 7, 20)
     const tt = Math.min(Math.max(t, 0) + la, len)
     city.edgePoint(this.a, this.b, tt, off, lp)
@@ -415,7 +418,7 @@ export class LaneDriver {
     steerTo(car, aimX, aimY)
     let target = this.speedCap * (w >= 28 ? 2 : w >= 18 ? 1.3 : w <= 6 ? 0.6 : 1) // the highway ring is fast
     if (city.isCurve(this.a, this.b)) target = Math.min(target, 10) // ease through the bends
-    if (this.turnSlow && toEnd < 40) target = Math.min(target, 6.5)
+    if (this.turnSlow && toEnd < 40) target = Math.min(target, car.spec.truck ? 5 : 6.5)
     // a siren: slow down, but never stop in the middle of a junction
     if (this.pullOver) target = Math.min(target, this.next >= 0 && toEnd < hwn + 20 ? 6 : 3)
     target = Math.min(target, cap)
@@ -573,12 +576,14 @@ export const Traffic = {
       const to = nb[(Math.random() * nb.length) | 0]
       const t = 0.25 + Math.random() * 0.4
       const p = city.lanePoint(n, to, t)
-      if (!game.spotFree(p.x, p.y, 12)) continue
-      const spec = Math.random() < 0.1 ? pick(TRAFFIC_BIKES) : pick(TRAFFIC_CARS)
+      // one vehicle in ten is a motorcycle, one in eight a lorry or pickup (mostly pickups), the rest cars
+      const r = Math.random()
+      const spec = r < 0.1 ? pick(TRAFFIC_BIKES) : r < 0.22 ? TRAFFIC_TRUCKS[Math.random() * 13 < 6 ? 0 : Math.random() * 7 < 4 ? 1 : 2] : pick(TRAFFIC_CARS)
+      if (!game.spotFree(p.x, p.y, 12 + 2 * Math.max(0, spec.len * 0.485 - 2.4))) continue
       const car = game.spawnCar(spec, p.x, p.y, Math.atan2(p.uy, p.ux), 'civil')
       car.setSpeed(8)
       const drv = new LaneDriver(city, n, to)
-      drv.speedCap = 9 + Math.random() * 6
+      drv.speedCap = (9 + Math.random() * 6) * (spec.truck ? 0.8 : 1) // lorries are the slow ones
       game.civs.push({ car, driver: drv })
       return
     }

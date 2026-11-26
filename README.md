@@ -59,6 +59,7 @@ src/
     render/                  camera, effects (particles, skid marks), renderer (world), hudCanvas (speedo, minimap)
 public/cars/                 car sprites
 public/bikes/                motorcycle sprites (top view and side view each)
+public/trucks/               the three lorries of the traffic (top view)
 ```
 
 The world is endless. It is an infinite grid of tiles (16 x 16 blocks, about 1.8 km), each generated on demand from `hash(seed, tx, ty)` so the
@@ -158,6 +159,21 @@ in traffic is one too (`TRAFFIC_BIKES`).
   and is cleared away. Smaller bumps just hurt (bikes have low durability).
 - **Art**: `node scripts/build-assets.mjs "<folder with motorcycle-*.jpg>" --only bikes` cuts the white background out, turns every picture to face left
   and writes 512 px WebP files to `public/bikes/` (top view `race.webp`, side view `race-side.webp`, and the same for `cruiser` and `dirt`).
+
+## Lorries and busier roads
+Three lorries only ever drive around in traffic (`TRAFFIC_TRUCKS` in `data/cars.ts`: a pickup 5.4 m, a box truck 7 m, a container truck 9 m). They are
+not in the garage or the save. On the road about 1 vehicle in 8 is a lorry (mostly pickups), 1 in 10 a motorcycle, the rest cars; lorries are the
+slow ones (speed cap x0.8). The traffic target is now 110 vehicles on desktop and 65 on phones, times the quality tier.
+
+Long vehicles need room, so the spacing in traffic is length-aware:
+- `capForTraffic` (`ai/drive.ts`) adds up the two vehicles' half lengths and widths for the following distance, the side corridor and the give-way
+  distance, never going below the old fixed numbers (so two cars behave exactly as before).
+- `LaneDriver` (`world/traffic.ts`) stops a lorry's nose at the same line as a car's, keeps its junction booking until its tail has cleared the junction
+  (`+ 2 * extra` metres, where `extra` is how much longer than a car it is), needs more free road beyond a junction, and keeps closer to the kerb so
+  its swing as it straightens up after a turn stays out of the other lane. Lorries also have proper brakes and the same turning circle as a car, so they
+  can follow the junction curves.
+- The 110-vehicle simulation test (cars, motorcycles and lorries packed into town for 90 s) has no collisions across 40 random seeds.
+- Art: `node scripts/build-assets.mjs "<folder>" --only trucks`. The white lorry photos sit on a white backdrop, so their background cut-off is stricter.
 
 Tests live next to the code (`src/**/*.test.ts`). The Matter.js physics runs headless in them: 0-100 km/h time, steering stability,
 braking and reversing, and a wall crash.

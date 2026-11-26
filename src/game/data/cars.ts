@@ -74,6 +74,22 @@ export const TRAFFIC_CARS: CarSpec[] = PLAYER_CARS.filter((c) => !c.bike).map(ev
 /** the motorcycles on the road (about one vehicle in ten) */
 export const TRAFFIC_BIKES: CarSpec[] = PLAYER_CARS.filter((c) => c.bike).map(everyday)
 
+/** Lorries and a pickup: they only ever drive around in traffic (never in the garage or the save), slower and much heavier than the cars. */
+export const TRAFFIC_TRUCKS: CarSpec[] = [
+  mk({
+    id: 'pickup', name: 'Silver Pickup', cls: 'Truck', file: 'trucks/pickup.webp', truck: true, len: 5.4, hitW: 2.0,
+    mass: 2600, top: kmh(150), accel: 3.6, brakeDecel: 10, grip: 9.5, turnRadius0: 5.5, steerResp: 9, durability: 2, redline: 5500,
+  }),
+  mk({
+    id: 'box', name: 'Box Truck', cls: 'Truck', file: 'trucks/box.webp', truck: true, len: 7, hitW: 2.35,
+    mass: 6500, top: kmh(115), accel: 2.4, brakeDecel: 10, grip: 9, turnRadius0: 5.7, steerResp: 9, durability: 3, redline: 4500,
+  }),
+  mk({
+    id: 'container', name: 'Container Truck', cls: 'Truck', file: 'trucks/container.webp', truck: true, len: 9, hitW: 2.45,
+    mass: 12000, top: kmh(100), accel: 1.8, brakeDecel: 10, grip: 8.5, turnRadius0: 6, steerResp: 9, durability: 4, redline: 4000,
+  }),
+]
+
 export const POLICE_SPEC: CarSpec = mk({
   id: 'police', name: 'Interceptor', cls: 'Police', file: 'cars/1795439954041.png', mass: 1750, top: kmh(256), accel: 6.9, grip: 11.6, durability: 1.15, police: true,
 })
@@ -83,7 +99,11 @@ export const POLICE_HEAVY: CarSpec = mk({
 })
 
 export const ALL_CAR_FILES: string[] = Array.from(
-  new Set(PLAYER_CARS.flatMap((c) => (c.side ? [c.file, c.side] : [c.file])).concat([POLICE_SPEC.file])),
+  new Set(
+    PLAYER_CARS.flatMap((c) => (c.side ? [c.file, c.side] : [c.file]))
+      .concat(TRAFFIC_TRUCKS.map((c) => c.file))
+      .concat([POLICE_SPEC.file]),
+  ),
 )
 
 /** Stats for the car-select screen: integrate the same drive formula the car uses. */
